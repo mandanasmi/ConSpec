@@ -15,21 +15,20 @@ from stable_baselines3.common.vec_env import (DummyVecEnv, SubprocVecEnv,
                                               VecEnvWrapper)
 from stable_baselines3.common.vec_env.vec_normalize import \
     VecNormalize as VecNormalize_
+# try:
+#     import dmc2gym
+# except ImportError:
+#     pass
 
-try:
-    import dmc2gym
-except ImportError:
-    pass
+# try:
+#     import roboschool
+# except ImportError:
+#     pass
 
-try:
-    import roboschool
-except ImportError:
-    pass
-
-try:
-    import pybullet_envs
-except ImportError:
-    pass
+# try:
+#     import pybullet_envs
+# except ImportError:
+#     pass
 
 
 def make_env(env_id, seed, rank, log_dir, allow_early_resets):

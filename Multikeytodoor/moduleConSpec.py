@@ -45,6 +45,7 @@ class moduleCL(nn.Module):
         miniSuccesssize = int(hidden.shape[1] / 2)
 
         for iii in range(self.head):
+            
             out1[iii] = self.layers[iii](self.main[iii](hidden))  # hidden = length, minibatch, latent       #keyhead
             s1, s2, s3 = out1[iii].shape
             currentweights = self.layers2[iii].reshape(1, 1, -1).repeat(s1, 1, 1)

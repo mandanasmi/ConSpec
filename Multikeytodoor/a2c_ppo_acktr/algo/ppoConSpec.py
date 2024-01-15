@@ -83,7 +83,10 @@ class PPOConSpec():
 
         rollouts.contrastvalueReward(sendContrastvalue)
 
-    def update(self, rollouts, head, keysUsed,goodones,iterate):
+    def update(self, rollouts, head, keysUsed, goodones,iterate):
+        """
+        Learning RL update and ConsPec 
+        """
         advantages = rollouts.returns[:-1] - rollouts.value_preds[:-1]
         advantages = (advantages - advantages.mean()) / (
             advantages.std() + 1e-5)
@@ -95,7 +98,7 @@ class PPOConSpec():
         wwtotalneg = []
         attentionCL = []
         costCL = 0
-        #################ConSpec module is learned
+        ################# ConSpec module is learned 
         if rollouts.stepS > rollouts.success -1:
 
             ########################
@@ -121,7 +124,7 @@ class PPOConSpec():
                         actions_batch)
                     hidden = hidden.view(*obs_batchorig.size()[:2], -1)
                     costCL0, attentionCL0, ww = self.moduleCL(hidden, reward_batch, iii, obs_batchorig,  iterate, self.args.seed,0)
-                    cossimtotalmaxxx, _ = (torch.max(attentionCL0, dim=0))
+                    cossimtotalmaxxx, _ = (torch.max(attentionCL0, dim=0)) ## not necessary
                     attentionCL.append(attentionCL0[:,:,iii].squeeze().transpose(1,0))
                     costCL += costCL0
                     wwtotalpos.append(ww[0][iii].detach().cpu())
@@ -130,13 +133,13 @@ class PPOConSpec():
 
             for indall in range(head):
                 if (wwtotalpos[indall] - wwtotalneg[indall] > 0.6) and wwtotalpos[indall] > 0.6:
-                    goodones[indall] += 1
+                    goodones[indall] += 1 #indall (i)
                 else:
-                    goodones[indall] = 0
+                    goodones[indall] = 0  
             for iii in range(head):
-                if goodones[iii] > 25 and keysUsed[iii] < 0.1:
-                    keysUsed[iii] = 1.
-                    rollouts.storeheadsSF(iii)
+                if goodones[iii] > 25 and keysUsed[iii] < 0.1: ## goodones[prototype] > 25 if the the agent has satsified the criterion of 0.6 more than 25 consequitive times then promote it to be frozen in the success RB 
+                    keysUsed[iii] = 1. # specifies that which prototype has satisfied the criterion 
+                    rollouts.storeheadsSF(iii) # take a snapshot of trajectories that lead critical prototypes(iii) of sucesses and failures 
             if self.args.factorR < 0.01:
                 pass
             else:
@@ -145,6 +148,7 @@ class PPOConSpec():
                 self.optimizerCL.step()
             print('trained!')
 
+        ## RL algorithm is learned (default ppo code)
         for e in range(self.ppo_epoch):
             if self.actor_critic.is_recurrent:
                 data_generator = rollouts.recurrent_generator(

@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-
+import numpy as np
 
 def _flatten_helper(T, N, _tensor):
     return _tensor.view(T * N, *_tensor.size()[2:])
@@ -8,7 +8,7 @@ def _flatten_helper(T, N, _tensor):
 
 class RolloutStorage(object):
     def __init__(self, num_steps, num_processes, obs_shape, action_space,
-                 recurrent_hidden_state_size, head):
+                 recurrent_hidden_state_size, num_prototype):
         self.obs = torch.zeros(num_steps + 1, num_processes, *obs_shape)
 
         self.num_processes = num_processes
@@ -35,9 +35,9 @@ class RolloutStorage(object):
         self.step = 0
 
         self.recurrent_hidden_state_size = recurrent_hidden_state_size
-        self.heads = head
-        self.success = 16
-        self.successTake = 16
+        self.heads = num_prototype
+        self.success = 16 # size of both success anf failure buffers
+        self.successTake = 16 # how many trajectories you take from the success and failure buffers
         self.hidden_state_size = 256
 
         self.obs_batchheadsS = [None] * self.heads
@@ -48,7 +48,6 @@ class RolloutStorage(object):
         self.stepheadsS = 0
 
         self.obs_batchheadsF = [None] * self.heads
-
         self.r_batchheadsF = [None] * self.heads
         self.recurrent_hidden_statesbatchheadsF = [None] * self.heads
         self.act_batchheadsF = [None] * self.heads
@@ -129,14 +128,14 @@ class RolloutStorage(object):
     def addPosNeg(self, ForS, device, args):
         totalreward = self.rewards[-10:].sum(0)
 
-        if ForS == 1:
+        if ForS == 1: ## for success, record trajectories of successful trajectories 
             rewardssortgood = torch.nonzero(totalreward > 0.5).reshape(-1, )
             indicesrewardbatch = rewardssortgood[0::2]
             obsxx = self.obs[:, indicesrewardbatch].to(device)
             numberaddedxx = obsxx.shape[1]
             if numberaddedxx >1:
                 indicesrewardbatch = rewardssortgood[0:4:2]
-        else:
+        else: 
             rewardssortbad = torch.nonzero(totalreward < 0.5).reshape(-1, )
             indicesrewardbatch = rewardssortbad[0::2]
         obs = self.obs[:, indicesrewardbatch].to(device)
@@ -487,3 +486,16 @@ class RolloutStorage(object):
 
             yield obs_batch, recurrent_hidden_states_batch, actions_batch, \
                   value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ
+
+    def save(self, filename): 
+        data={'success_traj_protos': self.obs_batchheadsS,
+              'fail_traj_protos':self.obs_batchheadsF,
+              'success_traj':self.obs_batchS,
+              'replay':self.obs,
+              'success_traj_rewards':self.r_batchS,
+              'length':self.step,
+              'success_proto_length':self.stepheadsF,
+              'success_length': self.stepS,
+              'fail_length': self.stepF,
+              }
+        np.savez_compressed(filename, **data)
