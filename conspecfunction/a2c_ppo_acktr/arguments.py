@@ -5,25 +5,75 @@ import torch
 
 def get_args():
     parser = argparse.ArgumentParser(description='RL')
+
+
+    ####################################
+    # Arguments pertaining to ConSpec
+    ####################################
     parser.add_argument(
-        '--head',
+        '--num_prototypes',
         type=int,
-        default=3,
-        help='gail batch size (default: 128)')
+        default=8,
+        help='')
     parser.add_argument(
-        '--choiceCLparams',
+        '--lrConSpec', type=float, default=20e-4, help='learning rate (default: 7e-4)')
+    parser.add_argument(
+        '--intrinsicR_scale',
+        type=float,
+        default=0.2,
+        help='')
+    ####################################
+    # Arguments pertaining the Pycolab tasks
+    ####################################
+
+    parser.add_argument(
+        '--pycolab_game',
+        default='key_to_door4',
+        help='key_to_door4, key_to_door2, key_to_door3, ')
+    parser.add_argument(
+        '--pycolab_apple_reward_min',
+        type=float,
+        default=0.,
+        help='RMSprop optimizer epsilon (default: 1e-5)')
+    parser.add_argument(
+        '--pycolab_apple_reward_max',
+        type=float,
+        default=0.,
+        help='RMSprop optimizer epsilon (default: 1e-5)')
+    parser.add_argument(
+        '--pycolab_final_reward',
+        type=float,
+        default=1.,
+        help='RMSprop optimizer epsilon (default: 1e-5)')
+    parser.add_argument(
+        '--pycolab_num_apples',
         type=int,
-        default=0,
-        help='gail batch size (default: 128)')
+        default=10,
+        help='')
+    parser.add_argument(
+        '--pycolab_fix_apple_reward_in_episode',
+        action='store_false',
+        default=True,
+        help='use generalized advantage estimation')
+    parser.add_argument(
+        '--pycolab_crop',
+        action='store_true',
+        default=False,
+        help='use generalized advantage estimation')
+
+    ####################################
+    # Original arguments pertaining to RL algorithm - from https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail
+    ####################################
+
+
     parser.add_argument(
         '--skip',
         type=int,
         default=4,
-        help='gail batch size (default: 128)')
+        help='')
+
     parser.add_argument(
-        '--lrCL', type=float, default=7e-4, help='learning rate (default: 7e-4)')
-    parser.add_argument(
-        '--algo', default='ppoCL', help='algorithm to use: a2c | ppo | acktr')
+        '--algo', default='ppo', help='algorithm to use: a2c | ppo | acktr')
     parser.add_argument(
         '--gail',
         action='store_true',
@@ -37,7 +87,7 @@ def get_args():
         '--gail-batch-size',
         type=int,
         default=128,
-        help='gail batch size (default: 128)')
+        help='')
     parser.add_argument(
         '--gail-epoch', type=int, default=5, help='gail epochs (default: 5)')
     parser.add_argument(
@@ -52,6 +102,7 @@ def get_args():
         type=float,
         default=0.99,
         help='RMSprop optimizer apha (default: 0.99)')
+
     parser.add_argument(
         '--gamma',
         type=float,
@@ -70,7 +121,7 @@ def get_args():
     parser.add_argument(
         '--entropy-coef',
         type=float,
-        default=0.01,
+        default=0.02,
         help='entropy term coefficient (default: 0.01)')
     parser.add_argument(
         '--value-loss-coef',
@@ -107,7 +158,7 @@ def get_args():
     parser.add_argument(
         '--num-mini-batch',
         type=int,
-        default=32,
+        default=4,
         help='number of batches for ppo (default: 32)')
     parser.add_argument(
         '--clip-param',
@@ -117,7 +168,7 @@ def get_args():
     parser.add_argument(
         '--log-interval',
         type=int,
-        default=10,
+        default=1,
         help='log interval, one log per n updates (default: 10)')
     parser.add_argument(
         '--save-interval',
@@ -158,8 +209,8 @@ def get_args():
         help='compute returns taking into account time limits')
     parser.add_argument(
         '--recurrent-policy',
-        action='store_true',
-        default=False,
+        action='store_false',
+        default=True,
         help='use a recurrent policy')
     parser.add_argument(
         '--use-linear-lr-decay',
@@ -169,11 +220,4 @@ def get_args():
     args = parser.parse_args()
 
     args.cuda = not args.no_cuda and torch.cuda.is_available()
-    ################I REMOVED THIS
-    #assert args.algo in ['a2c', 'ppo', 'acktr']
-    #if args.recurrent_policy:
-    #    assert args.algo in ['a2c', 'ppo'], \
-    #        'Recurrent policy is not implemented for ACKTR'
-    ################I REMOVED THIS
-
     return args

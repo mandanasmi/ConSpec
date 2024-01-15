@@ -8,7 +8,17 @@ def _flatten_helper(T, N, _tensor):
 
 class RolloutStorage(object):
     def __init__(self, num_steps, num_processes, obs_shape, action_space,
-                 recurrent_hidden_state_size, head):
+                 recurrent_hidden_state_size, num_prototypes):
+
+        '''
+        contains the current minibatch, as well as the success and failure memory buffers
+        for each trajectory, the observations, rewards, recurrent hidden states, actions, and masks are stored.
+        e.g. obs_batchS = the observations for the success buffer
+        e.g. obs_batchF = the oservations in the failure buffer
+
+        section 3.3 of the manuscript also describes the process of memory freezing for each prototype:
+        these are stored in the variables e.g. self.obs_batch_frozen_S[i] which house the observations for successful trjaectories of prototype i
+        '''
         self.obs = torch.zeros(num_steps + 1, num_processes, *obs_shape)
 
         self.num_processes = num_processes
@@ -35,25 +45,11 @@ class RolloutStorage(object):
         self.step = 0
 
         self.recurrent_hidden_state_size = recurrent_hidden_state_size
-        self.heads = head
+        self.num_prototypes = num_prototypes
         self.success = 16
-        self.successTake = 16
+        self.success_sample = 16
         self.hidden_state_size = 256
 
-        self.obs_batchheadsS = [None] * self.heads
-        self.r_batchheadsS = [None] * self.heads
-        self.recurrent_hidden_statesbatchheadsS = [None] * self.heads
-        self.act_batchheadsS = [None] * self.heads
-        self.masks_batchheadsS = [None] * self.heads
-        self.stepheadsS = 0
-
-        self.obs_batchheadsF = [None] * self.heads
-
-        self.r_batchheadsF = [None] * self.heads
-        self.recurrent_hidden_statesbatchheadsF = [None] * self.heads
-        self.act_batchheadsF = [None] * self.heads
-        self.masks_batchheadsF = [None] * self.heads
-        self.stepheadsF = 0
 
         self.obs_batchS = torch.zeros(self.num_steps + 1, self.success, *self.obs_shape)
         self.r_batchS = torch.zeros(self.num_steps, self.success, 1)
@@ -69,72 +65,74 @@ class RolloutStorage(object):
         self.act_batchF = self.act_batchF.long()
         self.masks_batchF = torch.zeros(self.num_steps + 1, self.success, 1)
         self.stepF = 0
-        for i in range(self.heads):
-            self.obs_batchheadsS[i] = torch.zeros(self.num_steps + 1, self.success, *self.obs_shape)
-            self.r_batchheadsS[i] = torch.zeros(self.num_steps, self.success, 1)
-            self.recurrent_hidden_statesbatchheadsS[i] = torch.zeros(self.num_steps + 1, self.success,
-                                                                     self.recurrent_hidden_state_size)
-            self.act_batchheadsS[i] = torch.zeros(self.num_steps, self.success, action_shape)
-            self.act_batchheadsS[i] = self.act_batchheadsS[i].long()
-            self.masks_batchheadsS[i] = torch.zeros(self.num_steps + 1, self.success, 1)
-            self.obs_batchheadsF[i] = torch.zeros(self.num_steps + 1, self.success, *self.obs_shape)
-            self.r_batchheadsF[i] = torch.zeros(self.num_steps, self.success, 1)
-            self.recurrent_hidden_statesbatchheadsF[i] = torch.zeros(self.num_steps + 1, self.success,
-                                                                     self.recurrent_hidden_state_size)
-            self.act_batchheadsF[i] = torch.zeros(self.num_steps, self.success, action_shape)
-            self.act_batchheadsF[i] = self.act_batchheadsF[i].long()
-            self.masks_batchheadsF[i] = torch.zeros(self.num_steps + 1, self.success, 1)
 
-        self.keysUsed = torch.zeros(head,)
-        self.goodones = torch.zeros(head,)
-    def contrastvalueReward(self, contrastval):
+
+
+        self.obs_batch_frozen_S = [None] * self.num_prototypes
+        self.r_batch_frozen_S = [None] * self.num_prototypes
+        self.recurrent_hidden_statesbatch_frozen_S = [None] * self.num_prototypes
+        self.act_batch_frozen_S = [None] * self.num_prototypes
+        self.masks_batch_frozen_S = [None] * self.num_prototypes
+        self.step_frozen_S = 0
+
+        self.obs_batch_frozen_F = [None] * self.num_prototypes
+        self.r_batch_frozen_F = [None] * self.num_prototypes
+        self.recurrent_hidden_statesbatch_frozen_F = [None] * self.num_prototypes
+        self.act_batch_frozen_F = [None] * self.num_prototypes
+        self.masks_batch_frozen_F = [None] * self.num_prototypes
+        self.step_frozen_F = 0
+        for i in range(self.num_prototypes):
+            self.obs_batch_frozen_S[i] = torch.zeros(self.num_steps + 1, self.success, *self.obs_shape)
+            self.r_batch_frozen_S[i] = torch.zeros(self.num_steps, self.success, 1)
+            self.recurrent_hidden_statesbatch_frozen_S[i] = torch.zeros(self.num_steps + 1, self.success,
+                                                                     self.recurrent_hidden_state_size)
+            self.act_batch_frozen_S[i] = torch.zeros(self.num_steps, self.success, action_shape)
+            self.act_batch_frozen_S[i] = self.act_batch_frozen_S[i].long()
+            self.masks_batch_frozen_S[i] = torch.zeros(self.num_steps + 1, self.success, 1)
+            self.obs_batch_frozen_F[i] = torch.zeros(self.num_steps + 1, self.success, *self.obs_shape)
+            self.r_batch_frozen_F[i] = torch.zeros(self.num_steps, self.success, 1)
+            self.recurrent_hidden_statesbatch_frozen_F[i] = torch.zeros(self.num_steps + 1, self.success,
+                                                                     self.recurrent_hidden_state_size)
+            self.act_batch_frozen_F[i] = torch.zeros(self.num_steps, self.success, action_shape)
+            self.act_batch_frozen_F[i] = self.act_batch_frozen_F[i].long()
+            self.masks_batch_frozen_F[i] = torch.zeros(self.num_steps + 1, self.success, 1)
+
+        self.prototypesUsed = torch.zeros(self.num_prototypes,)
+        self.count_prototypes_timesteps_criterion = torch.zeros(self.num_prototypes,)
+    def calc_total_reward(self, contrastval):
         self.rewardsORIG = torch.clone(self.rewards)
         self.rewards = self.rewards  + contrastval.unsqueeze(-1)
         return self.rewards
 
+    def retrieve_prototypes_used(self):
+        return self.prototypesUsed , self.count_prototypes_timesteps_criterion
 
-
-    def retrievekeysused(self):
-        return self.keysUsed , self.goodones
-
-    def storekeysused(self, keysUsed,goodones):  # this arises ONLY from the need to add the WHOLE SET, it is evoked ONCE.
-        self.keysUsed=keysUsed
-        self.goodones=goodones
-
-    def retrievestepS(self):
-        return self.stepS
-
-    def retrieveR(self):
-        return self.rewards
-
-    def retrieveobs(self):
-        return self.obs
+    def store_prototypes_used(self, prototypesUsed,count_prototypes_timesteps_criterion):  # this arises ONLY from the need to add the WHOLE SET, it is evoked ONCE.
+        self.prototypesUsed=prototypesUsed
+        self.count_prototypes_timesteps_criterion=count_prototypes_timesteps_criterion
 
     def retrieveeverything(self):
         return torch.cat((self.obs_batchS, self.obs_batchF), dim=1), torch.cat((self.r_batchS, self.r_batchF),
                                                                                dim=1), torch.cat(
             (self.masks_batchS, self.masks_batchF), dim=1), torch.cat((self.act_batchS, self.act_batchF), dim=1)
 
-    def retrieveRS(self):
-        return self.r_batchS, self.r_batchF
+    def store_frozen_SF(self, i):
+        self.obs_batch_frozen_S[i] = self.obs_batchS
+        self.r_batch_frozen_S[i] = self.r_batchS
+        self.recurrent_hidden_statesbatch_frozen_S[i] = self.recurrent_hidden_statesS
+        self.act_batch_frozen_S[i] = self.act_batchS
+        self.masks_batch_frozen_S[i] = self.masks_batchS
+        self.obs_batch_frozen_F[i] = self.obs_batchF
+        self.r_batch_frozen_F[i] = self.r_batchF
+        self.recurrent_hidden_statesbatch_frozen_F[i] = self.recurrent_hidden_statesF
+        self.act_batch_frozen_F[i] = self.act_batchF
+        self.masks_batch_frozen_F[i] = self.masks_batchF
 
-
-    def storeheadsSF(self, head):
-        self.obs_batchheadsS[head] = self.obs_batchS
-        self.r_batchheadsS[head] = self.r_batchS
-        self.recurrent_hidden_statesbatchheadsS[head] = self.recurrent_hidden_statesS
-        self.act_batchheadsS[head] = self.act_batchS
-        self.masks_batchheadsS[head] = self.masks_batchS
-        self.obs_batchheadsF[head] = self.obs_batchF
-        self.r_batchheadsF[head] = self.r_batchF
-        self.recurrent_hidden_statesbatchheadsF[head] = self.recurrent_hidden_statesF
-        self.act_batchheadsF[head] = self.act_batchF
-        self.masks_batchheadsF[head] = self.masks_batchF
-
-    def addPosNeg(self, ForS, device):
+    def addPosNeg(self, S_or_F, device):
+        '''this is the function for adding the trajectories to success (pos) and failure (neg) memory buffers '''
         totalreward = self.rewards[-10:].sum(0)
 
-        if ForS == 1:
+        if S_or_F == 'pos':
             rewardssortgood = torch.nonzero(totalreward > 0.5).reshape(-1, )
             indicesrewardbatch = rewardssortgood[0::2]
             obsxx = self.obs[:, indicesrewardbatch].to(device)
@@ -151,21 +149,23 @@ class RolloutStorage(object):
         rew = self.rewards[:, indicesrewardbatch].to(device)
         numberadded = obs.shape[1]
 
+        # print(obs.shape, rec.shape, masks.shape, act.shape, rew.shape)
+
         # '''
         if numberadded > 0:
-            if ForS == 1:
+            if S_or_F == 'pos':
                 numcareabout = self.stepS
-            elif ForS == 0:
+            elif S_or_F == 'neg':
                 numcareabout = self.stepF
             if numberadded + numcareabout <= self.obs_batchS.shape[1]:
-                if ForS == 1:
+                if S_or_F == 'pos':
                     self.obs_batchS[:, self.stepS:self.stepS + numberadded] = obs
                     self.r_batchS[:, self.stepS:self.stepS + numberadded] = rew
                     self.recurrent_hidden_statesS[:, self.stepS:self.stepS + numberadded] = rec
                     self.act_batchS[:, self.stepS:self.stepS + numberadded] = act
                     self.masks_batchS[:, self.stepS:self.stepS + numberadded] = masks
                     self.stepS = (self.stepS + numberadded)
-                elif ForS == 0:
+                elif S_or_F == 'neg':
                     self.obs_batchF[:, self.stepF:self.stepF + numberadded] = obs
                     self.r_batchF[:, self.stepF:self.stepF + numberadded] = rew
                     self.recurrent_hidden_statesF[:, self.stepF:self.stepF + numberadded] = rec
@@ -176,7 +176,7 @@ class RolloutStorage(object):
             elif (numberadded + numcareabout >= self.obs_batchS.shape[1]) and (
                     numcareabout < self.obs_batchS.shape[1]):
 
-                if ForS == 1:
+                if S_or_F == 'pos':
                     numbertoadd = self.obs_batchS.shape[1] - self.stepS
                     self.obs_batchS[:, self.stepS:self.stepS + numbertoadd, :] = obs[:, :numbertoadd]
                     self.r_batchS[:, self.stepS:self.stepS + numbertoadd] = rew[:, :numbertoadd]
@@ -185,7 +185,7 @@ class RolloutStorage(object):
                     self.masks_batchS[:, self.stepS:self.stepS + numbertoadd] = masks[:, :numbertoadd]
                     self.stepS = (self.stepS + numbertoadd)
 
-                elif ForS == 0:
+                elif S_or_F == 'neg':
                     numbertoadd = self.obs_batchS.shape[1] - self.stepF
                     self.obs_batchF[:, self.stepF:self.stepF + numbertoadd, :] = obs[:, :numbertoadd]
                     self.r_batchF[:, self.stepF:self.stepF + numbertoadd] = rew[:, :numbertoadd]
@@ -199,7 +199,7 @@ class RolloutStorage(object):
                 hidden_state = rec
                 masks = masks
 
-                if ForS == 1:
+                if S_or_F == 'pos':
                     lenconsider = obs.shape[1]
                     self.obs_batchS = torch.cat((self.obs_batchS , obs),1)
                     self.r_batchS = torch.cat((self.r_batchS , rew),1)
@@ -212,18 +212,13 @@ class RolloutStorage(object):
                     self.act_batchS = self.act_batchS[:,lenconsider:]
                     self.masks_batchS = self.masks_batchS[:,lenconsider:]
 
-                elif ForS == 0:
+                elif S_or_F == 'neg':
                     lenconsider =  obs.shape[1]
-                    self.obs_batchF = torch.cat((self.obs_batchF, obs),
-                                                1)
-                    self.r_batchF = torch.cat((self.r_batchF, rew),
-                                              1)
-                    self.recurrent_hidden_statesF = torch.cat((self.recurrent_hidden_statesF, rec),
-                                                              1)
-                    self.act_batchF = torch.cat((self.act_batchF, act),
-                                                1)
-                    self.masks_batchF = torch.cat((self.masks_batchF, masks),
-                                                  1)
+                    self.obs_batchF = torch.cat((self.obs_batchF, obs),  1)
+                    self.r_batchF = torch.cat((self.r_batchF, rew), 1)
+                    self.recurrent_hidden_statesF = torch.cat((self.recurrent_hidden_statesF, rec),1)
+                    self.act_batchF = torch.cat((self.act_batchF, act),1)
+                    self.masks_batchF = torch.cat((self.masks_batchF, masks),  1)
                     self.obs_batchF = self.obs_batchF[:, lenconsider:]
                     self.r_batchF = self.r_batchF[:, lenconsider:]
                     self.recurrent_hidden_statesF = self.recurrent_hidden_statesF[:, lenconsider:]
@@ -231,6 +226,7 @@ class RolloutStorage(object):
                     self.masks_batchF = self.masks_batchF[:, lenconsider:]
 
     def to(self, device):
+        '''just adding cuda to all the memory buffers'''
         self.obs = self.obs.to(device)
         self.recurrent_hidden_states = self.recurrent_hidden_states.to(device)
         self.rewards = self.rewards.to(device)
@@ -251,17 +247,17 @@ class RolloutStorage(object):
         self.recurrent_hidden_statesF = self.recurrent_hidden_statesF.to(device)
         self.act_batchF = self.act_batchF.to(device)
         self.masks_batchF = self.masks_batchF.to(device)
-        for i in range(self.heads):
-            self.obs_batchheadsS[i] = self.obs_batchheadsS[i].to(device)
-            self.r_batchheadsS[i] = self.r_batchheadsS[i].to(device)
-            self.recurrent_hidden_statesbatchheadsS[i] = self.recurrent_hidden_statesbatchheadsS[i].to(device)
-            self.act_batchheadsS[i] = self.act_batchheadsS[i].to(device)
-            self.masks_batchheadsS[i] = self.masks_batchheadsS[i].to(device)
-            self.obs_batchheadsF[i] = self.obs_batchheadsF[i].to(device)
-            self.r_batchheadsF[i] = self.r_batchheadsF[i].to(device)
-            self.recurrent_hidden_statesbatchheadsF[i] = self.recurrent_hidden_statesbatchheadsF[i].to(device)
-            self.act_batchheadsF[i] = self.act_batchheadsF[i].to(device)
-            self.masks_batchheadsF[i] = self.masks_batchheadsF[i].to(device)
+        for i in range(self.num_prototypes):
+            self.obs_batch_frozen_S[i] = self.obs_batch_frozen_S[i].to(device)
+            self.r_batch_frozen_S[i] = self.r_batch_frozen_S[i].to(device)
+            self.recurrent_hidden_statesbatch_frozen_S[i] = self.recurrent_hidden_statesbatch_frozen_S[i].to(device)
+            self.act_batch_frozen_S[i] = self.act_batch_frozen_S[i].to(device)
+            self.masks_batch_frozen_S[i] = self.masks_batch_frozen_S[i].to(device)
+            self.obs_batch_frozen_F[i] = self.obs_batch_frozen_F[i].to(device)
+            self.r_batch_frozen_F[i] = self.r_batch_frozen_F[i].to(device)
+            self.recurrent_hidden_statesbatch_frozen_F[i] = self.recurrent_hidden_statesbatch_frozen_F[i].to(device)
+            self.act_batch_frozen_F[i] = self.act_batch_frozen_F[i].to(device)
+            self.masks_batch_frozen_F[i] = self.masks_batch_frozen_F[i].to(device)
 
     def insert(self, obs, recurrent_hidden_states, actions,  rewards, masks, bad_masks):
         self.obs[self.step + 1].copy_(obs)
@@ -273,16 +269,16 @@ class RolloutStorage(object):
         self.bad_masks[self.step + 1].copy_(bad_masks)
         self.step = (self.step + 1) % self.num_steps
 
-    def insertall(self, obs, recurrent_hidden_states, actions, rewards, masks, bad_masks):
+    def insert_trajectory_batch(self, obs, recurrent_hidden_states, actions, rewards, masks):
         self.obs = obs
         self.recurrent_hidden_states = recurrent_hidden_states
         self.actions = actions
         self.rewards=rewards
         self.masks=masks
-        self.bad_masks=bad_masks
+        self.bad_masks=masks.clone()
         # self.step = (self.step + 1) % self.num_steps
 
-    def feed_attnR(self):
+    def retrieve_batch(self):
         obs_batch = self.obs[:-1].view(-1, *self.obs.size()[2:])
         obs_batchorig = self.obs[:-1]
         recurrent_hidden_states_batch = self.recurrent_hidden_states[:-1].view(
@@ -294,27 +290,24 @@ class RolloutStorage(object):
 
         return obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, reward_batch
 
-    def releaseB(self):
-        return self.obs, self.rewardsORIG, self.recurrent_hidden_states, self.actions, self.masks
-
-    def releaseheadsSF(self, head):
+    def releasefrozenSF(self, i):
         permS = torch.randperm(self.success)
         permF = torch.randperm(self.success)
-        permS = permS[:self.successTake]
-        permF = permF[:self.successTake]
-        rew_batch = torch.cat((self.r_batchheadsS[head][:, permS], self.r_batchheadsF[head][:, permF]), dim=1)
-        obs_batch = torch.cat((self.obs_batchheadsS[head][:, permS], self.obs_batchheadsF[head][:, permF]), dim=1)
-        recurrent_hidden_states = torch.cat((self.recurrent_hidden_statesbatchheadsS[head][:, permS],
-                                             self.recurrent_hidden_statesbatchheadsF[head][:, permF]), dim=1)
-        act_batch = torch.cat((self.act_batchheadsS[head][:, permS], self.act_batchheadsF[head][:, permF]), dim=1)
-        masks_batch = torch.cat((self.masks_batchheadsS[head][:, permS], self.masks_batchheadsF[head][:, permF]), dim=1)
+        permS = permS[:self.success_sample]
+        permF = permF[:self.success_sample]
+        rew_batch = torch.cat((self.r_batch_frozen_S[i][:, permS], self.r_batch_frozen_F[i][:, permF]), dim=1)
+        obs_batch = torch.cat((self.obs_batch_frozen_S[i][:, permS], self.obs_batch_frozen_F[i][:, permF]), dim=1)
+        recurrent_hidden_states = torch.cat((self.recurrent_hidden_statesbatch_frozen_S[i][:, permS],
+                                             self.recurrent_hidden_statesbatch_frozen_F[i][:, permF]), dim=1)
+        act_batch = torch.cat((self.act_batch_frozen_S[i][:, permS], self.act_batch_frozen_F[i][:, permF]), dim=1)
+        masks_batch = torch.cat((self.masks_batch_frozen_S[i][:, permS], self.masks_batch_frozen_F[i][:, permF]), dim=1)
         return obs_batch, rew_batch, recurrent_hidden_states, act_batch, masks_batch
 
     def releaseSF(self):
         permS = torch.randperm(self.success)
         permF = torch.randperm(self.success)
-        permS = permS[:self.successTake]
-        permF = permF[:self.successTake]
+        permS = permS[:self.success_sample]
+        permF = permF[:self.success_sample]
 
         rew_batch = torch.cat((self.r_batchS[:, permS], self.r_batchF[:, permF]), dim=1)
         obs_batch = torch.cat((self.obs_batchS[:, permS], self.obs_batchF[:, permF]), dim=1)
@@ -324,17 +317,8 @@ class RolloutStorage(object):
         masks_batch = torch.cat((self.masks_batchS[:, permS], self.masks_batchF[:, permF]), dim=1)
         return obs_batch, rew_batch, recurrent_hidden_states, act_batch, masks_batch
 
-    def feed_attnRB(self):
-        obs_batchx, rew_batchx, recurrent_hidden_statesx, act_batchx, masks_batchx = self.releaseB()
-        obs_batch = obs_batchx[:-1].view(-1, *self.obs.size()[2:])
-        obs_batchorig = obs_batchx[:-1]
-        recurrent_hidden_states_batch = recurrent_hidden_statesx[:-1].view(-1, self.recurrent_hidden_states.size(-1))
-        actions_batch = act_batchx.view(-1, self.actions.size(-1))
-        masks_batch = masks_batchx[:-1].view(-1, 1)
-        reward_batch = rew_batchx.squeeze()  # [:-1]#.view(-1, 1)
-        return obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, reward_batch
-
-    def feed_attnRSF(self):
+    def retrieve_SFbuffer(self):
+        '''retrieving memories from the success/failure buffers'''
         obs_batchx, rew_batchx, recurrent_hidden_statesx, act_batchx, masks_batchx = self.releaseSF()
         obs_batch = obs_batchx[:-1].view(-1, *self.obs.size()[2:])
         obs_batchorig = obs_batchx[:-1]
@@ -344,8 +328,9 @@ class RolloutStorage(object):
         reward_batch = rew_batchx.squeeze()  # [:-1]#.view(-1, 1)
         return obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, reward_batch
 
-    def feed_attnRSFheads(self, head):
-        obs_batchx, rew_batchx, recurrent_hidden_statesx, act_batchx, masks_batchx = self.releaseheadsSF(head)
+    def retrieve_SFbuffer_frozen(self, i):
+        '''retrieving memories from the frozen success/failure buffers'''
+        obs_batchx, rew_batchx, recurrent_hidden_statesx, act_batchx, masks_batchx = self.releasefrozenSF(i)
         obs_batch = obs_batchx[:-1].view(-1, *self.obs.size()[2:])
         obs_batchorig = obs_batchx[:-1]
         recurrent_hidden_states_batch = recurrent_hidden_statesx[:-1].view(-1, self.recurrent_hidden_states.size(-1))

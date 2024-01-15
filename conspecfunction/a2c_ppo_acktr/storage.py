@@ -164,8 +164,8 @@ class RolloutStorage(object):
     def release(self):
         return self.obs, self.rewards, self.recurrent_hidden_states, self.actions, self.masks
 
-    def storeintrinsic(self, rewardtotalintrisic):
-        self.rewards = rewardtotalintrisic
+    def storereward(self, rewardtotal):
+        self.rewards = rewardtotal
 
     def feed_forward_generator(self,
                                advantages,

@@ -23,12 +23,10 @@ from __future__ import print_function
 import numpy as np
 from pycolab import rendering
 
-from tvt.pycolab import key_to_doormany4
 
-
-from tvt.pycolab import key_to_door5_2keyseasy
-from tvt.pycolab import key_to_door5_4keyseasy
-from tvt.pycolab import key_to_door5_3keyseasy
+from tvt.pycolab import key_to_door4
+from tvt.pycolab import key_to_door3
+from tvt.pycolab import key_to_door2
 
 
 from tensorflow.contrib import framework as contrib_framework
@@ -49,43 +47,28 @@ class PycolabEnvironment(object):
     """Construct a `environment.Base` adapter that wraps a pycolab game."""
     rng = np.random.RandomState()
 
-    if game == 'key_to_door5_3keyseasy':
-      self._game = key_to_door5_3keyseasy.Game(rng,
+    if game == 'key_to_door3':
+      self._game = key_to_door3.Game(rng,
                                     num_apples,
                                     apple_reward,
                                     fix_apple_reward_in_episode,
                                     final_reward,
                                     False)
-    elif game == 'key_to_door5_4keyseasy':
-      self._game = key_to_door5_4keyseasy.Game(rng,
-                                    num_apples,
-                                    apple_reward,
-                                    fix_apple_reward_in_episode,
-                                    final_reward,
-                                    False)
-
-    elif game == 'key_to_door5_2keyseasy':
-      self._game = key_to_door5_2keyseasy.Game(rng,
-                                    num_apples,
-                                    apple_reward,
-                                    fix_apple_reward_in_episode,
-                                    final_reward,
-                                    False)
-    elif game == 'key_to_door5_4conditions':
-      self._game = key_to_door5_4conditions.Game(rng,
+    elif game == 'key_to_door4':
+      self._game = key_to_door4.Game(rng,
                                     num_apples,
                                     apple_reward,
                                     fix_apple_reward_in_episode,
                                     final_reward,
                                     False)
 
-    elif game == 'key_to_doormany4':
-        self._game = key_to_doormany4.Game(rng,
-                                           num_apples,
-                                           apple_reward,
-                                           fix_apple_reward_in_episode,
-                                           final_reward,
-                                           False)
+    elif game == 'key_to_door2':
+      self._game = key_to_door2.Game(rng,
+                                    num_apples,
+                                    apple_reward,
+                                    fix_apple_reward_in_episode,
+                                    final_reward,
+                                    False)
     
     else:
       raise ValueError('Unsupported game "%s".' % game)

@@ -52,16 +52,16 @@ DEFAULT_MAX_FRAMES_PER_PHASElong4keys = {
     'explore4': 15,
     'distractor4': 45,
     'reward': 10
-} #15.90,15  = ordinary 60,0,60  = 4rooms, 15,0,15 = keydoor4
+} 
 
-DEFAULT_MAX_FRAMES_PER_PHASElong2keysr = {
+DEFAULT_MAX_FRAMES_PER_PHASElong2keys = {
     'explore': 10,
     'distractor': 45,
     'explore2': 15,
     'distractor2': 45,
     'reward': 10
-} #15.90,15  = ordinary 60,0,60  = 4rooms, 15,0,15 = keydoor4
-DEFAULT_MAX_FRAMES_PER_PHASElong3keysr = {
+}
+DEFAULT_MAX_FRAMES_PER_PHASElong3keys = {
     'explore': 10,
     'distractor': 45,
     'explore2': 15,
@@ -69,13 +69,8 @@ DEFAULT_MAX_FRAMES_PER_PHASElong3keysr = {
     'explore3': 15,
     'distractor3': 45,
     'reward': 10
-} #15.90,15  = ordinary 60,0,60  = 4rooms, 15,0,15 = keydoor4
+}
 
-DEFAULT_MAX_FRAMES_PER_PHASElong44 = {
-    'explore': 10,
-    'distractor': 85,
-    'reward': 10
-} #15.90,15  = ordinary 60,0,60  = 4rooms, 15,0,15 = keydoor4
 
 
 # Reserved symbols.
