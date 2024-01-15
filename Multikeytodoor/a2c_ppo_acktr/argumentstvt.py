@@ -17,13 +17,13 @@ def get_args():
         help='gail batch size (default: 128)')
     parser.add_argument(
         '--pycolab_game',
-        default='key_to_door5',
+        default='key_to_doormany4',
         help='gail batch size (default: 128)')
     parser.add_argument(
         '--expansion',
         type=int,
-        default=4,
-        help='gail batch size (default: 128)')
+        default=24,
+        help='gail batch size (default: 24)')
     parser.add_argument(
         '--pycolab_apple_reward_min',
         type=float,
