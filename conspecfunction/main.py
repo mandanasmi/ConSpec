@@ -1,21 +1,14 @@
-import copy
-import glob
 import os
-import time
 from collections import deque
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-import sys
-import numpy
-import wandb
-from misc import Logger, makedir
-
+from misc import Logger, vis_prototypes
+import matplotlib.pyplot as plt
+import json
 ########packages to runthe pycolab game
 from tvt import batch_env
 from tvt import nest_utils
 from tvt.pycolab import env as pycolab_env
+from Conspec.ConSpec import ConSpec
 
 ########packages to run the underlying RL algorithm, mostly identical to https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail
 from a2c_ppo_acktr import algo, utils
@@ -29,8 +22,9 @@ import numpy as np
 from six.moves import range
 from six.moves import zip
 import tensorflow.compat.v1 as tf
-
-
+# from data_collection import collect_gfn_data, read_data, get_cosine_similarity, visualize
+import pickle
+import datetime
 
 '''
 The code below is nearly identical to https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail 
@@ -42,22 +36,31 @@ def main():
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
 
+    # Create the folder for results 
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    subfolder_name = f"{timestamp}_{args.pycolab_game}_{args.seed}_{args.num_episodes}"
+    base_directory = "data"
+    full_path = os.path.join(base_directory, subfolder_name)
+    os.makedirs(full_path, exist_ok=True)
+
+
     if args.cuda and torch.cuda.is_available() and args.cuda_deterministic:
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
 
+
     wandb_project_name = 'conspec'
-    wandb.init(name='sunchipsster', project=wandb_project_name)
-    proj_name = 'Results' + str(args.pycolab_game) + str(args.seed)
+    #wandb.init(project=wandb_project_name)
+    proj_name = str(args.pycolab_game) +' seed'+ str(args.seed)+ ' episodes'+ str(args.num_episodes)
     logger = Logger(
         exp_name=proj_name,
-        save_dir='/home/mila/c/chen.sun/scratch/conspec',
+        save_dir='/home/mila/s/samieima/scratch/conspec',
         print_every=1,
-        save_every=10000,
-        total_step=10000,
+        save_every=args.log_interval,
+        total_step=args.num_episodes,
         print_to_stdout=True,
         wandb_project_name=wandb_project_name,
-        wandb_tags=[],
+        wandb_tags=['multikeydoor'],
         wandb_config=args,
     )
 
@@ -71,18 +74,18 @@ def main():
 
     env_builder = pycolab_env.PycolabEnvironment
     env_kwargs = {
-        'game': args.pycolab_game,
-        'num_apples': args.pycolab_num_apples,
-        'apple_reward': [args.pycolab_apple_reward_min,
-                         args.pycolab_apple_reward_max],
+        'game': args.pycolab_game, # key to door 4
+        'num_apples': args.pycolab_num_apples, # 10 
+        'apple_reward': [args.pycolab_apple_reward_min, #0
+                         args.pycolab_apple_reward_max], #0
         'fix_apple_reward_in_episode': args.pycolab_fix_apple_reward_in_episode,
         'final_reward': args.pycolab_final_reward,
         'crop': args.pycolab_crop
     }
     env = batch_env.BatchEnv(args.num_processes, env_builder, **env_kwargs)
+
     ep_length = env.episode_length
     args.num_steps = ep_length
-
     envs = env
     obsspace = (3,5,5) #env.observation_shape
     actor_critic = Policy(
@@ -119,25 +122,28 @@ def main():
     '''
     Here, the main ConSpec class is loaded. All the relevant ConSpec functions and objects are contained in this class.
     '''
-    from Conspec.ConSpec import ConSpec
     conspecfunction = ConSpec(args,   obsspace,  env.num_actions,  device)
-    ##############################################################
+    # file_path='datasets/frozen/trajectory_data_gfn_{}_seed_{}_{}_episodes_frozen.csv'.format(args.pycolab_game, args.seed, args.num_episodes)
+    # cos_file_path='datasets/frozen/cos_sim_{}_seed_{}_{}_episodes_frozen.csv'.format(args.pycolab_game, args.seed ,args.num_episodes)
 
+    ##############################################################
+    print('steps', args.num_steps)
     rollouts = RolloutStorage(args.num_steps, args.num_processes,
                               obsspace, env.num_actions,
                               actor_critic.recurrent_hidden_state_size, args.num_prototypes)  # envs.observation_space.shape
     rollouts.to(device)
 
-    obs, _ = envs.reset()
+    obs, _ = envs.reset()    
     obs = (torch.from_numpy(obs)).permute((0, 3, 1, 2)).to(device)
     rollouts.obs[0].copy_(obs)
     rollouts.to(device)
 
     episode_rewards = deque(maxlen=10)
     num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes
-
+    ##retrieving memories from the success/failure buffers
+    all_memories = []
     logger.start()
-    for j in range(10000):
+    for episode in range(args.num_episodes):
         logger.step()
         obs, _ = envs.reset()
         obs = (torch.from_numpy(obs)).permute((0, 3, 1, 2)).to(device)
@@ -146,7 +152,7 @@ def main():
         if args.use_linear_lr_decay:
             # decrease learning rate linearly
             utils.update_linear_schedule(
-                agent.optimizer, j, num_updates,
+                agent.optimizer, episode, num_updates,
                 agent.optimizer.lr if args.algo == "acktr" else args.lr)
 
         for step in range(args.num_steps):
@@ -176,13 +182,15 @@ def main():
 
         ###############CONSPEC FUNCTIONS##############################
         '''
-        the purpose here is to: 
+        The purpose here is to: 
         1. retrieve the current minibatch of trajectory (including its observations, rewards, hidden states, actions, masks)
         2. "do everything" that ConSpec needs to do internally for training, and output the intrinsic + extrinsic reward for the current minibatch of trajectories
         3. store this total reward in the memory buffer 
         '''
+        
         obstotal, rewardtotal, recurrent_hidden_statestotal, actiontotal,  maskstotal  = rollouts.release()
         reward_intrinsic_extrinsic  = conspecfunction.do_everything(obstotal, recurrent_hidden_statestotal, actiontotal, rewardtotal, maskstotal)
+        
         rollouts.storereward(reward_intrinsic_extrinsic)
         ##############################################################
 
@@ -192,11 +200,75 @@ def main():
         value_loss, action_loss, dist_entropy= agent.update(rollouts)
         rollouts.after_update()
 
-        if j % args.log_interval == 0 and len(episode_rewards) > 1:
+       
+        if episode % args.log_interval == 0 and len(episode_rewards) > 1:
             logger.meter("results", "R", rewardstotal[-10:,:].sum(0).mean().cpu().detach().numpy())
             logger.meter("results", "dist_entropy", dist_entropy)
             logger.meter("results", "value_loss", value_loss)
             logger.meter("results", "action_loss", action_loss)
+
+        if episode > args.start_checkpoint and (episode+1) % args.checkpoint_interval == 0:
+            buffer = {
+             'obs': rollouts.obs,
+             'rewards': rollouts.rewards,
+             'hidden_states': rollouts.recurrent_hidden_states,
+             'actions': rollouts.actions,
+             'masks': rollouts.masks,
+             'bad_masks': rollouts.bad_masks,
+             'value_preds': rollouts.value_preds,
+            }
+            sf_buffer = conspecfunction.rollouts.retrieve_SFbuffer()
+            conspec_rollouts = {
+                'obs': sf_buffer[0],
+                'rewards': sf_buffer[5],
+                'hidden_states': sf_buffer[1],
+                'actions': sf_buffer[3],
+                'masks': sf_buffer[2],
+                'bad_masks': sf_buffer[2],
+                'value_preds': sf_buffer[4],
+            }
+            # print(type(conspecfunction.prototypes))
+            tensor_proto_list = [p.data for p in conspecfunction.prototypes.prototypes]
+            checkpoint = {
+                'epoch': episode,
+                'encoder_state_dict': conspecfunction.encoder.state_dict(),
+                'actor_critic_state_dict': actor_critic.state_dict(),
+                'optimizer_conspec_state_dict': conspecfunction.optimizerConSpec.state_dict(),
+                'optimizer_ppo_state_dict': agent.optimizer.state_dict(),
+                'prototypes_state_dict': tensor_proto_list,
+                'prototypes': conspecfunction.prototypes.prototypes.state_dict(),
+                }
+            cos_checkpoint = {
+                'cos_max_scores' : conspecfunction.rollouts.cos_max_scores, 
+                'max_indices' : conspecfunction.rollouts.max_indx,
+                'cos_scores' : conspecfunction.rollouts.cos_scores,
+                # 'cos_success' : conspecfunction.rollouts.cos_score_pos,
+                # 'cos_failure' : conspecfunction.rollouts.cos_score_neg,
+            }
+                    
+            print('saving checkpoints....')
+            checkpoint_path = os.path.join(full_path, f'checkpoint_epoch_{episode}.pth')
+            buffer_path = os.path.join(full_path, f'buffer_epoch_{episode}.pth')
+            conspec_rollouts_path = os.path.join(full_path, f'conspec_rollouts_epoch_{episode}.pth')
+            cos_path = os.path.join(full_path, f'cos_sim_epoch_{episode}.pth')
+
+            torch.save(checkpoint, checkpoint_path)
+            print('checkpoint saved')
+
+            torch.save(buffer, buffer_path)
+            print('buffer saved')
+
+            torch.save(conspec_rollouts, conspec_rollouts_path)
+            print('success/failure buffers saved')
+
+            torch.save(cos_checkpoint, cos_path)
+            print('cosine similarity saved')
+
+
+    # pickle data files
+
+
     logger.finish()
+
 if __name__ == "__main__":
     main()
