@@ -33,8 +33,10 @@ class RolloutStorage(object):
         action_shape = 1
         self.actions = torch.zeros(num_steps, num_processes, action_shape)
         self.actions = self.actions.long()
-
         self.masks = torch.ones(num_steps + 1, num_processes, 1)
+        self.max_indx = torch.zeros(num_processes, num_prototypes)  # torch.Size([32, 8])
+        self.cos_scores = torch.zeros(num_steps, num_processes, num_prototypes) # torch.Size([125, 32, 8])
+        self.cos_max_scores= torch.zeros(num_processes, num_prototypes) # torch.Size([32, 8])
 
         # Masks that indicate whether it's a true terminal state
         # or time limit end state
@@ -50,7 +52,6 @@ class RolloutStorage(object):
         self.success_sample = 16
         self.hidden_state_size = 256
 
-
         self.obs_batchS = torch.zeros(self.num_steps + 1, self.success, *self.obs_shape)
         self.r_batchS = torch.zeros(self.num_steps, self.success, 1)
         self.recurrent_hidden_statesS = torch.zeros(self.num_steps + 1, self.success, self.recurrent_hidden_state_size)
@@ -58,6 +59,7 @@ class RolloutStorage(object):
         self.act_batchS = self.act_batchS.long()
         self.masks_batchS = torch.zeros(self.num_steps + 1, self.success, 1)
         self.stepS = 0
+        
         self.obs_batchF = torch.zeros(self.num_steps + 1, self.success, *self.obs_shape)
         self.r_batchF = torch.zeros(self.num_steps, self.success, 1)
         self.recurrent_hidden_statesF = torch.zeros(self.num_steps + 1, self.success, self.recurrent_hidden_state_size)
@@ -65,7 +67,6 @@ class RolloutStorage(object):
         self.act_batchF = self.act_batchF.long()
         self.masks_batchF = torch.zeros(self.num_steps + 1, self.success, 1)
         self.stepF = 0
-
 
 
         self.obs_batch_frozen_S = [None] * self.num_prototypes
@@ -99,6 +100,7 @@ class RolloutStorage(object):
 
         self.prototypesUsed = torch.zeros(self.num_prototypes,)
         self.count_prototypes_timesteps_criterion = torch.zeros(self.num_prototypes,)
+        
     def calc_total_reward(self, contrastval):
         self.rewardsORIG = torch.clone(self.rewards)
         self.rewards = self.rewards  + contrastval.unsqueeze(-1)
@@ -128,6 +130,7 @@ class RolloutStorage(object):
         self.act_batch_frozen_F[i] = self.act_batchF
         self.masks_batch_frozen_F[i] = self.masks_batchF
 
+
     def addPosNeg(self, S_or_F, device):
         '''this is the function for adding the trajectories to success (pos) and failure (neg) memory buffers '''
         totalreward = self.rewards[-10:].sum(0)
@@ -135,20 +138,25 @@ class RolloutStorage(object):
         if S_or_F == 'pos':
             rewardssortgood = torch.nonzero(totalreward > 0.5).reshape(-1, )
             indicesrewardbatch = rewardssortgood[0::2]
+            # print('pos: indicesrewardbatch', indicesrewardbatch)
             obsxx = self.obs[:, indicesrewardbatch].to(device)
             numberaddedxx = obsxx.shape[1]
             if numberaddedxx >1:
                 indicesrewardbatch = rewardssortgood[0:4:2]
+            # print('pos: indicesrewardbatch', indicesrewardbatch)
         else:
             rewardssortbad = torch.nonzero(totalreward < 0.5).reshape(-1, )
             indicesrewardbatch = rewardssortbad[0::2]
+            # print('neg: indicesrewardbatch', indicesrewardbatch)
+        
         obs = self.obs[:, indicesrewardbatch].to(device)
         rec = self.recurrent_hidden_states[:, indicesrewardbatch].to(device)
         masks = self.masks[:, indicesrewardbatch].to(device)
         act = self.actions[:, indicesrewardbatch].to(device)
         rew = self.rewards[:, indicesrewardbatch].to(device)
+        # cos = self.cos_scores[:, indicesrewardbatch].to(device)
         numberadded = obs.shape[1]
-
+        # print('numberadded', numberadded)
         # print(obs.shape, rec.shape, masks.shape, act.shape, rew.shape)
 
         # '''
@@ -158,24 +166,33 @@ class RolloutStorage(object):
             elif S_or_F == 'neg':
                 numcareabout = self.stepF
             if numberadded + numcareabout <= self.obs_batchS.shape[1]:
+                # print('numberadded + numcareabout <= self.obs_batchS.shape[1]', numberadded, numcareabout, self.obs_batchS.shape[1])    
                 if S_or_F == 'pos':
                     self.obs_batchS[:, self.stepS:self.stepS + numberadded] = obs
                     self.r_batchS[:, self.stepS:self.stepS + numberadded] = rew
                     self.recurrent_hidden_statesS[:, self.stepS:self.stepS + numberadded] = rec
                     self.act_batchS[:, self.stepS:self.stepS + numberadded] = act
                     self.masks_batchS[:, self.stepS:self.stepS + numberadded] = masks
+                    # print('add pos, stepS, stepS+numberadded, numberadded:', self.stepS, self.stepS + numberadded, numberadded)
+                    # print(self.cos_score_pos.shape, cos.shape)
+                    # self.cos_score_pos[:, self.stepS:self.stepS + numberadded] = cos
                     self.stepS = (self.stepS + numberadded)
+
                 elif S_or_F == 'neg':
                     self.obs_batchF[:, self.stepF:self.stepF + numberadded] = obs
                     self.r_batchF[:, self.stepF:self.stepF + numberadded] = rew
                     self.recurrent_hidden_statesF[:, self.stepF:self.stepF + numberadded] = rec
                     self.act_batchF[:, self.stepF:self.stepF + numberadded] = act
                     self.masks_batchF[:, self.stepF:self.stepF + numberadded] = masks
+                    # print('add pos, stepF, stepF+numbertoadd, numbertoadd:', self.stepF, self.stepF + numbertoadd, numbertoadd)
+                    # print(self.cos_score_neg.shape, cos.shape)
+                    # self.cos_score_neg[:, self.stepF:self.stepF + numberadded] = cos
                     self.stepF = (self.stepF + numberadded)
             #'''
             elif (numberadded + numcareabout >= self.obs_batchS.shape[1]) and (
                     numcareabout < self.obs_batchS.shape[1]):
-
+                # print('numberadded + numcareabout >= self.obs_batchS.shape[1]', numberadded, numcareabout, self.obs_batchS.shape[1])
+                
                 if S_or_F == 'pos':
                     numbertoadd = self.obs_batchS.shape[1] - self.stepS
                     self.obs_batchS[:, self.stepS:self.stepS + numbertoadd, :] = obs[:, :numbertoadd]
@@ -183,6 +200,9 @@ class RolloutStorage(object):
                     self.recurrent_hidden_statesS[:, self.stepS:self.stepS + numbertoadd] = rec[:, :numbertoadd]
                     self.act_batchS[:, self.stepS:self.stepS + numbertoadd] = act[:, :numbertoadd]
                     self.masks_batchS[:, self.stepS:self.stepS + numbertoadd] = masks[:, :numbertoadd]
+                    # print('add pos:', self.stepS, self.stepS + numbertoadd, numbertoadd)
+                    # print(self.cos_score_pos.shape, cos.shape)
+                    # self.cos_score_pos[:, self.stepS:self.stepS + numbertoadd] = cos[:, :numbertoadd]
                     self.stepS = (self.stepS + numbertoadd)
 
                 elif S_or_F == 'neg':
@@ -192,38 +212,51 @@ class RolloutStorage(object):
                     self.recurrent_hidden_statesF[:, self.stepF:self.stepF + numbertoadd] = rec[:, :numbertoadd]
                     self.act_batchF[:, self.stepF:self.stepF + numbertoadd] = act[:, :numbertoadd]
                     self.masks_batchF[:, self.stepF:self.stepF + numbertoadd] = masks[:, :numbertoadd]
+                    # print('add neg:', self.stepF, self.stepF + numbertoadd, numbertoadd)
+                    # print(self.cos_score_pos.shape, cos.shape)
+                    # self.cos_score_neg[:, self.stepF:self.stepF + numbertoadd] = cos[:, :numbertoadd]
                     self.stepF = (self.stepF + numbertoadd)
 
-            elif numcareabout == self.obs_batchS.shape[
-                1]:
+            elif numcareabout == self.obs_batchS.shape[1]:
+                # print('numcareabout == self.obs_batchS.shape[1]', numcareabout, self.obs_batchS.shape[1])
                 hidden_state = rec
                 masks = masks
 
                 if S_or_F == 'pos':
                     lenconsider = obs.shape[1]
-                    self.obs_batchS = torch.cat((self.obs_batchS , obs),1)
-                    self.r_batchS = torch.cat((self.r_batchS , rew),1)
-                    self.recurrent_hidden_statesS = torch.cat((self.recurrent_hidden_statesS , rec),1)
-                    self.act_batchS = torch.cat((self.act_batchS , act),1)
-                    self.masks_batchS = torch.cat((self.masks_batchS , masks),1)
+                    self.obs_batchS = torch.cat((self.obs_batchS , obs),dim=1)
+                    self.r_batchS = torch.cat((self.r_batchS , rew),dim=1)
+                    self.recurrent_hidden_statesS = torch.cat((self.recurrent_hidden_statesS , rec),dim=1)
+                    self.act_batchS = torch.cat((self.act_batchS , act),dim=1)
+                    self.masks_batchS = torch.cat((self.masks_batchS , masks),dim=1)
+                    # print('add pos:', lenconsider)
+                    # print(self.cos_score_pos.shape, cos.shape)
+                    # self.cos_score_pos = torch.cat((self.cos_score_pos, cos), dim=1)
+                    
                     self.obs_batchS = self.obs_batchS[:,lenconsider:]
                     self.r_batchS = self.r_batchS[:,lenconsider:]
                     self.recurrent_hidden_statesS = self.recurrent_hidden_statesS[:,lenconsider:]
                     self.act_batchS = self.act_batchS[:,lenconsider:]
                     self.masks_batchS = self.masks_batchS[:,lenconsider:]
+                    # self.cos_score_pos = self.cos_score_pos[:,lenconsider:]
 
                 elif S_or_F == 'neg':
                     lenconsider =  obs.shape[1]
-                    self.obs_batchF = torch.cat((self.obs_batchF, obs),  1)
-                    self.r_batchF = torch.cat((self.r_batchF, rew), 1)
-                    self.recurrent_hidden_statesF = torch.cat((self.recurrent_hidden_statesF, rec),1)
-                    self.act_batchF = torch.cat((self.act_batchF, act),1)
-                    self.masks_batchF = torch.cat((self.masks_batchF, masks),  1)
+                    self.obs_batchF = torch.cat((self.obs_batchF, obs),  dim=1)
+                    self.r_batchF = torch.cat((self.r_batchF, rew), dim=1)
+                    self.recurrent_hidden_statesF = torch.cat((self.recurrent_hidden_statesF, rec),dim=1)
+                    self.act_batchF = torch.cat((self.act_batchF, act),dim=1)
+                    self.masks_batchF = torch.cat((self.masks_batchF, masks), dim=1)
+                    # print('add neg:', lenconsider)
+                    # print(self.cos_score_neg.shape, cos.shape)
+                    # self.cos_score_neg = torch.cat((self.cos_score_neg, cos), dim=1)
+
                     self.obs_batchF = self.obs_batchF[:, lenconsider:]
                     self.r_batchF = self.r_batchF[:, lenconsider:]
                     self.recurrent_hidden_statesF = self.recurrent_hidden_statesF[:, lenconsider:]
                     self.act_batchF = self.act_batchF[:, lenconsider:]
                     self.masks_batchF = self.masks_batchF[:, lenconsider:]
+                    # self.cos_score_neg = self.cos_score_neg[:, lenconsider:]
 
     def to(self, device):
         '''just adding cuda to all the memory buffers'''
@@ -236,6 +269,7 @@ class RolloutStorage(object):
         self.actions = self.actions.to(device)
         self.masks = self.masks.to(device)
         self.bad_masks = self.bad_masks.to(device)
+        # self.cos_score_pos = self.cos_score_pos.to(device)
 
         self.obs_batchS = self.obs_batchS.to(device)
         self.r_batchS = self.r_batchS.to(device)
@@ -247,17 +281,21 @@ class RolloutStorage(object):
         self.recurrent_hidden_statesF = self.recurrent_hidden_statesF.to(device)
         self.act_batchF = self.act_batchF.to(device)
         self.masks_batchF = self.masks_batchF.to(device)
+        # self.cos_score_neg = self.cos_score_neg.to(device)
+        
         for i in range(self.num_prototypes):
             self.obs_batch_frozen_S[i] = self.obs_batch_frozen_S[i].to(device)
             self.r_batch_frozen_S[i] = self.r_batch_frozen_S[i].to(device)
             self.recurrent_hidden_statesbatch_frozen_S[i] = self.recurrent_hidden_statesbatch_frozen_S[i].to(device)
             self.act_batch_frozen_S[i] = self.act_batch_frozen_S[i].to(device)
             self.masks_batch_frozen_S[i] = self.masks_batch_frozen_S[i].to(device)
+
             self.obs_batch_frozen_F[i] = self.obs_batch_frozen_F[i].to(device)
             self.r_batch_frozen_F[i] = self.r_batch_frozen_F[i].to(device)
             self.recurrent_hidden_statesbatch_frozen_F[i] = self.recurrent_hidden_statesbatch_frozen_F[i].to(device)
             self.act_batch_frozen_F[i] = self.act_batch_frozen_F[i].to(device)
             self.masks_batch_frozen_F[i] = self.masks_batch_frozen_F[i].to(device)
+            
 
     def insert(self, obs, recurrent_hidden_states, actions,  rewards, masks, bad_masks):
         self.obs[self.step + 1].copy_(obs)
