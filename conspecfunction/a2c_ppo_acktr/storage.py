@@ -54,12 +54,12 @@ class RolloutStorage(object):
     def retrieveobs(self):
         return self.obs
 
-    def retrieveeverything(self):
+    def retrieveeverything(self): ### !!! This function doesn't work 
         return torch.cat((self.obs_batchS, self.obs_batchF), dim=1), torch.cat((self.r_batchS, self.r_batchF),
                                                                                dim=1), torch.cat(
             (self.masks_batchS, self.masks_batchF), dim=1), torch.cat((self.act_batchS, self.act_batchF), dim=1)
 
-    def retrieveRS(self):
+    def retrieveRS(self):## this too!
         return self.r_batchS, self.r_batchF
 
 

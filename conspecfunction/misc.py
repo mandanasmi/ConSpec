@@ -5,6 +5,8 @@ from absl import logging
 from datetime import datetime
 import torch.nn as nn
 import numpy as np
+import matplotlib.pyplot as plt
+from moviepy.editor import ImageSequenceClip
 
 def makedir(path):
     if not os.path.exists(path):
@@ -12,6 +14,67 @@ def makedir(path):
         os.makedirs(path)
     else:
         print(path, "already exist!")
+
+def serialize_object(obj):
+    return {attr: getattr(obj, attr) for attr in dir(obj) if not attr.startswith('__') and not callable(getattr(obj, attr))}
+
+def visuali_obs(batch_env):
+    # Assuming batch_env is your BatchEnv instance
+    # and it has a method get_observations() that returns a list of observations
+    observations = batch_env.reset()
+
+    # Number of environments
+    num_envs = len(observations)
+
+    # Create subplots
+    fig, axes = plt.subplots(1, num_envs, figsize=(num_envs * 5, 5))
+
+    for i, obs in enumerate(observations):
+        ax = axes[i]
+        ax.imshow(obs)  # Replace this with appropriate plotting code for your observations
+        ax.set_title(f"Environment {i+1}")
+        plt.savefig('observation.png')
+        wandb.log({"observation Plot": wandb.Image('observation.png')})
+
+def vis_prototypes(conspec, args):
+        import time
+        current_time = time.strftime("%H:%M:%S")
+        prototypes_used, frequencies = conspec.rollouts.retrieve_prototypes_used()
+        print('prototypes_used', prototypes_used)
+        print('frequencies', frequencies)
+
+        # obs = obs_batch[:, :, :3, :, :]
+        # o1, o2, o3, o4, o5 = obs.shape
+
+        num_success_samples = conspec.rollouts.success_sample
+        ##obs =  [600, 16, 1, 54, 64]
+     
+        for i in range(conspec.num_prototypes):  # indtop5.size()[0]):  # top5
+            obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, reward_batch = conspec.rollouts.retrieve_SFbuffer_frozen(i)
+            cos_sim_total_max, cost_prototype, cos_scores, ـ = conspec.calc_cos_scores(obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, i)   
+            cos_max, indmaxes0 = torch.max(cos_scores, dim=0) # cos_max: torch.Size([16, 8])
+            # num_traj = obs_batch.shape[0]
+            # success_traj = int(num_traj/2)
+
+            obs = obs_batch.view(args.num_steps,  args.num_processes, *obs_batch.shape[1:])
+            # print('cos_max', cos_max.shape) # torch.Size([32, 8])
+            # print('indmaxes0', indmaxes0.shape) # torch.Size([32, 8])
+            # indmaxes0 = torch.argmax(cos_sim_total_max, dim=0)
+            if prototypes_used[i] == 0:
+                indmaxestop5 = indmaxes0  # indtop5[jjjj, :, :].squeeze()
+                o1, o2, o3, o4, o5 = obs.shape
+                # for iii in range(self.head):
+                obsgathered0 = torch.gather(obs, 0, indmaxestop5[:, i].reshape(1, -1, 1, 1, 1).repeat(o1, 1, o3, o4, o5))[0]
+                print('obsgather', obsgathered0.shape)
+                imgs = (np.asarray(obsgathered0.cpu().detach().numpy()))[:, :, :, :].transpose((0, 2, 3, 1))  # .repeat(3,axis=-1)  # .repeat(3,axis=-1)
+                fig = plt.figure(figsize=(20, 20))  # first coor = LENGTH
+                for j in range(num_success_samples*2):  # 16 [64,16]
+                    fig.add_subplot(4, 8, j + 1)
+                    plt.imshow(imgs[j, :, :, :].squeeze() / 255., interpolation='nearest')  # , cmap='gray')  # (81, 48, 5, 5, 3)
+                    plt.xlabel('R_' + str(reward_batch.sum(0)[j].cpu().detach().numpy()) + ' c_' + str(
+                        cos_sim_total_max[j, i].cpu().detach().numpy()) + 'p_' + str(indmaxes0[j, i].cpu().detach().numpy()))
+                plt.savefig('moviemaxfirst_visualizeTVTX' + "S" + str(current_time) + str(args.pycolab_game) + 'CLparam' + str(args.intrinsicR_scale) + 'lrConSpec' + str(args.lrConSpec) + 'seed' + str(args.seed) + 'topk' + str(j) + 'prototype' + str(i) + 'top5costX.pdf')
+                plt.close()
 
 class Logger:
     def __init__(
@@ -46,7 +109,7 @@ class Logger:
         self.objects_to_save = dict()
         if "/" in exp_suffix:
             exp_suffix = "_".join(exp_suffix.split("/")[:-1])
-        wandb.init(entity="sunchipsster", project=wandb_project_name, name=exp_name + "_" + exp_suffix, tags=wandb_tags, reinit=True)
+        wandb.init(entity="mandanasmi", project=wandb_project_name, name=exp_name + "_" + exp_suffix, tags=wandb_tags, reinit=True)
         wandb.config.update(wandb_config)
 
     def register_model_to_save(self, model, name):

@@ -1,12 +1,13 @@
-import numpy
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
 from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 import torch.optim as optim
 from .storageConSpec import RolloutStorage
-from .loss import prototypes
+from .prototype import prototypes
 from .modelConSpec import EncoderConSpec
+import matplotlib.pyplot as plt
 
 
 
@@ -60,28 +61,39 @@ class ConSpec(nn.Module):
             self.rollouts.insert_trajectory_batch(image_to_store, memory_to_store, action_to_store, reward_to_store, masks_to_store)  #
             self.rollouts.to(self.device)
             self.rollouts.addPosNeg('pos', self.device) ###add to the positive memory buffer
-            self.rollouts.addPosNeg('neg', self.device)###add to the negative memory buffer
+            self.rollouts.addPosNeg('neg', self.device) ###add to the negative memory buffer
 
     def calc_cos_scores(self,obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, prototype_number):
         '''computes the cosine similarity scores'''
-        hidden = self.encoder.retrieve_hiddens(obs_batch, recurrent_hidden_states_batch,masks_batch, actions_batch)
+        #print(obs_batch.shape) -> torch.Size([2000, 3, 5, 5])
+        hidden = self.encoder.retrieve_hiddens(obs_batch, recurrent_hidden_states_batch, masks_batch)
+        #print('in cos scores in Conspec', hidden.shape)  # hidden.shape after encoder is torch.Size([2000, 512])
+        #print('in cose scores in Conspec', hidden.view(*obs_batchorig.size()[:2], -1).shape, obs_batchorig.shape) 
+            # hidden.view(*obs_batchorig.size()[:2], -1).shape = torch.Size([125, 16, 512])
+            # obs_batchorig.shape = torch.Size([125, 16, 3, 5, 5])
+        #print('prototype number in cos scores in Conspec', prototype_number)  => -1
         return self.prototypes(hidden.view(*obs_batchorig.size()[:2], -1), prototype_number)
 
     def calc_intrinsic_reward(self):
         '''computes the intrinsic reward for the current minibatch of trajectories'''
         prototypes_used, count_prototypes_timesteps_criterion = self.rollouts.retrieve_prototypes_used()
         prototypes_used = prototypes_used.to(device=self.device)
+        #print('calc intrisic reward proto used',prototypes_used )
         with torch.no_grad():
             obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, reward_batch = self.rollouts.retrieve_batch()
-            _, cos_scores, _ = self.calc_cos_scores(obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, -1)
+            _, _, _, cos_scores, _ = self.calc_cos_scores(obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, -1)
+            #print('in calc intrisic cos scores shape before reshape', cos_scores.shape)  # torch.Size([125, 16, 8])   10 is the number of prototypes
             cos_scores = cos_scores.view(*obs_batchorig.size()[:2], -1)  # length, minibatch, keyhead
+            #print('cos score after reshape:', cos_scores.shape) # torch.Size([125, 32, 8])
             cos_scores = ((cos_scores > 0.6)) * cos_scores
-            prototypes_used = torch.tile(torch.reshape(prototypes_used, (1, 1, -1)), (*cos_scores.shape[:2], 1))
+            prototypes_used = torch.tile(torch.reshape(prototypes_used, (1, 1, -1)), (*cos_scores.shape[:2], 1)) # 
+
             prototypes_used = prototypes_used * self.intrinsicR_scale
+
             intrinsic_reward = (cos_scores * prototypes_used)
             roundhalf = 3
 
-            '''find the max rewrads in each rollng average (equation 2 of the manuscript)'''
+            '''find the max rewrads in each rolling average (equation 2 of the manuscript)'''
             rolling_max = []
             for i in range(roundhalf * 2 + 1):
                 temp = torch.roll(intrinsic_reward, i - roundhalf, dims=0)
@@ -107,29 +119,49 @@ class ConSpec(nn.Module):
     def update_conspec(self):
         '''trains the ConSpec module'''
         prototypes_used, count_prototypes_timesteps_criterion = self.rollouts.retrieve_prototypes_used()
-        wwtotalpos = []
-        wwtotalneg = []
-        attentionCL = []
+        # wwtotalpos = []
+        # wwtotalneg = []
+        # attentionCL = []
+        cos_scores_pos = []
+        cos_scores_neg = []
         costCL = 0
         if self.rollouts.stepS > self.rollouts.success - 1:
             ########################
             for j in range(self.num_prototypes):
                 if prototypes_used[j] > 0.5:
+                    print('prototypes used', j, prototypes_used[j])
                     obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, reward_batch = self.rollouts.retrieve_SFbuffer_frozen(
                         j)
                 else:
+                    print('still using SF buffer not the frozen one')
                     obs_batch, recurrent_hidden_states_batch, masks_batch, actions_batch, obs_batchorig, reward_batch = self.rollouts.retrieve_SFbuffer()
-                costCL0, attentionCL0, ww = self.calc_cos_scores(obs_batch, recurrent_hidden_states_batch, masks_batch,
-                                                        actions_batch, obs_batchorig, j)
 
-                cossimtotalmaxxx, _ = (torch.max(attentionCL0, dim=0))
-                attentionCL.append(attentionCL0[:, :, j].squeeze().transpose(1, 0))
-                costCL += costCL0
-                wwtotalpos.append(ww[0][j].detach().cpu())
-                wwtotalneg.append(ww[1][j].detach().cpu())
+                cos_max_score, max_inds, cost_prototype, cos_scores, cos_score_sf = self.calc_cos_scores(obs_batch, recurrent_hidden_states_batch, masks_batch,
+                                                        actions_batch, obs_batchorig, j)    
+                # self.rollouts.cos_scores = cos_scores # torch.Size([125, 16, 8])
+                # _, costCL0, attentionCL0, ww = self.calc_cos_scores(obs_batch, recurrent_hidden_states_batch, masks_batch,
+                #                                         actions_batch, obs_batchorig, j)
+
+                # cossimtotalmaxxx, _ = (torch.max(attentionCL0, dim=0))
+                # attentionCL.append(attentionCL0[:, :, j].squeeze().transpose(1, 0))
+                # costCL += costCL0
+                # wwtotalpos.append(ww[0][j].detach().cpu())
+                # wwtotalneg.append(ww[1][j].detach().cpu())
+
+                costCL += cost_prototype
+                cos_scores_pos.append(cos_score_sf[0][j].detach().cpu()) # torch.Size([16, 8])
+                cos_scores_neg.append(cos_score_sf[1][j].detach().cpu()) # torch.Size([16, 8])
+                self.rollouts.cos_max_scores = cos_max_score
+                self.rollouts.max_indx = max_inds
+                self.rollouts.cos_scores = cos_scores
+                # self.rollouts.cos_score_pos = cos_score_sf[0]
+                # self.rollouts.cos_score_neg = cos_score_sf[1]
 
             for i in range(self.num_prototypes):
-                if (wwtotalpos[i] - wwtotalneg[i] > 0.6) and wwtotalpos[i] > 0.6:
+                # if (wwtotalpos[i] - wwtotalneg[i] > 0.6) and wwtotalpos[i] > 0.6:
+                #print('hereeee', cos_scores_pos[i], cos_scores_neg[i], cos_scores_pos[i] - cos_scores_neg[i])
+
+                if (cos_scores_pos[i] - cos_scores_neg[i] > 0.6) and cos_scores_pos[i] > 0.6:
                     count_prototypes_timesteps_criterion[i] += 1
                 else:
                     count_prototypes_timesteps_criterion[i] = 0
@@ -148,3 +180,5 @@ class ConSpec(nn.Module):
         rewardtotal_intrisic_extrinsic = self.calc_intrinsic_reward()
         self.update_conspec()
         return rewardtotal_intrisic_extrinsic
+    
+

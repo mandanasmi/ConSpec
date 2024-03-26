@@ -16,7 +16,7 @@ def get_args():
         default=8,
         help='')
     parser.add_argument(
-        '--lrConSpec', type=float, default=20e-4, help='learning rate (default: 7e-4)')
+        '--lrConSpec', type=float, default=2e-3, help='learning rate (default: 7e-4)')
     parser.add_argument(
         '--intrinsicR_scale',
         type=float,
@@ -28,8 +28,15 @@ def get_args():
 
     parser.add_argument(
         '--pycolab_game',
-        default='key_to_door4',
-        help='key_to_door4, key_to_door2, key_to_door3, ')
+        default='key_to_door3',
+        help='key_to_door4, key_to_door2, key_to_door3')
+   
+    parser.add_argument(
+        '--num_episodes',
+        type=int,
+        default=1000,
+        help='500 for 2 key, 1000 for 3 keys, 2000 for 4 keys')
+
     parser.add_argument(
         '--pycolab_apple_reward_min',
         type=float,
@@ -143,7 +150,7 @@ def get_args():
     parser.add_argument(
         '--num-processes',
         type=int,
-        default=16,
+        default=8,
         help='how many training CPU processes to use (default: 16)')
     parser.add_argument(
         '--num-steps',
@@ -180,11 +187,22 @@ def get_args():
         type=int,
         default=None,
         help='eval interval, one eval per n updates (default: None)')
+    
+    parser.add_argument(
+        '--start_checkpoint',
+        type=int,
+        default=500,
+        help='checkpoint interval, one eval per n updates (default: None)')
+    parser.add_argument(
+        '--checkpoint_interval',
+        type=int,
+        default=100,
+        help='checkpoint interval, one eval per n updates (default: None)')
     parser.add_argument(
         '--num-env-steps',
         type=int,
-        default=10e8,
-        help='number of environment steps to train (default: 10e6)')
+        default=10e6,
+        help='number of environment steps to train (default: 10e6-8)')
     parser.add_argument(
         '--env-name',
         default='PongNoFrameskip-v4',
