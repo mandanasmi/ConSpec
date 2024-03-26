@@ -22,9 +22,10 @@ import numpy as np
 from six.moves import range
 from six.moves import zip
 import tensorflow.compat.v1 as tf
-# from data_collection import collect_gfn_data, read_data, get_cosine_similarity, visualize
-import pickle
 import datetime
+import pdb
+# from moviepy.editor import ImageSequenceClip
+
 
 '''
 The code below is nearly identical to https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail 
@@ -38,8 +39,8 @@ def main():
 
     # Create the folder for results 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    subfolder_name = f"{timestamp}_{args.pycolab_game}_{args.seed}_{args.num_episodes}"
-    base_directory = "data"
+    subfolder_name = f"{timestamp}_{args.pycolab_game}_{args.seed}_{args.num_episodes}_{args.num_prototypes}_{args.num_processes}"
+    base_directory = '/network/scratch/s/samieima/conspec_train'
     full_path = os.path.join(base_directory, subfolder_name)
     os.makedirs(full_path, exist_ok=True)
 
@@ -51,10 +52,10 @@ def main():
 
     wandb_project_name = 'conspec'
     #wandb.init(project=wandb_project_name)
-    proj_name = str(args.pycolab_game) +' seed'+ str(args.seed)+ ' episodes'+ str(args.num_episodes)
+    proj_name = str(args.pycolab_game) +' seed'+ str(args.seed)+ ' episodes'+ str(args.num_episodes)+ ' prototype' + str(args.num_prototypes)+ ' num_processes' + str(args.num_processes)
     logger = Logger(
         exp_name=proj_name,
-        save_dir='/home/mila/s/samieima/scratch/conspec',
+        save_dir='/network/scratch/s/samieima/conspec_train',
         print_every=1,
         save_every=args.log_interval,
         total_step=args.num_episodes,
@@ -140,13 +141,13 @@ def main():
 
     episode_rewards = deque(maxlen=10)
     num_updates = int(args.num_env_steps) // args.num_steps // args.num_processes
-    ##retrieving memories from the success/failure buffers
-    all_memories = []
     logger.start()
+    env_frames = {i: [] for i in range(args.num_processes)}  # to make a video of training
+
     for episode in range(args.num_episodes):
         logger.step()
         obs, _ = envs.reset()
-        obs = (torch.from_numpy(obs)).permute((0, 3, 1, 2)).to(device)
+        obs = (torch.from_numpy(obs)).permute((0, 3, 1, 2)).to(device) #torch.Size([num_processes, 3, 5, 5])
         rollouts.obs[0].copy_(obs)
         donetotal = np.zeros((args.num_processes,))  # .to(device)
         if args.use_linear_lr_decay:
@@ -171,6 +172,12 @@ def main():
             bad_masks = masks
             rollouts.insert(obs, recurrent_hidden_states, action,
                             action_log_prob, value, reward, masks, bad_masks)
+            
+            for i in range(args.num_processes):
+                vobs = obs[i].cpu().detach().numpy()
+                vobs = vobs.transpose(1, 2, 0)
+                env_frames[i].append(vobs) 
+         
 
         with torch.no_grad():
             next_value = actor_critic.get_value(
@@ -197,6 +204,7 @@ def main():
         rollouts.compute_returns(next_value, args.use_gae, args.gamma,
                                  args.gae_lambda, args.use_proper_time_limits)
 
+        print('epoch', episode)
         value_loss, action_loss, dist_entropy= agent.update(rollouts)
         rollouts.after_update()
 
@@ -207,7 +215,7 @@ def main():
             logger.meter("results", "value_loss", value_loss)
             logger.meter("results", "action_loss", action_loss)
 
-        if episode > args.start_checkpoint and (episode+1) % args.checkpoint_interval == 0:
+        if episode > args.start_checkpoint and (episode) % args.checkpoint_interval == 0:
             buffer = {
              'obs': rollouts.obs,
              'rewards': rollouts.rewards,
@@ -227,9 +235,8 @@ def main():
                 'bad_masks': sf_buffer[2],
                 'value_preds': sf_buffer[4],
             }
-            # print(type(conspecfunction.prototypes))
             tensor_proto_list = [p.data for p in conspecfunction.prototypes.prototypes]
-            checkpoint = {
+            model_checkpoint = {
                 'epoch': episode,
                 'encoder_state_dict': conspecfunction.encoder.state_dict(),
                 'actor_critic_state_dict': actor_critic.state_dict(),
@@ -247,13 +254,14 @@ def main():
             }
                     
             print('saving checkpoints....')
-            checkpoint_path = os.path.join(full_path, f'checkpoint_epoch_{episode}.pth')
+            checkpoint_path = os.path.join(full_path, f'model_checkpoint_epoch_{episode}.pth')
             buffer_path = os.path.join(full_path, f'buffer_epoch_{episode}.pth')
             conspec_rollouts_path = os.path.join(full_path, f'conspec_rollouts_epoch_{episode}.pth')
             cos_path = os.path.join(full_path, f'cos_sim_epoch_{episode}.pth')
+           
 
-            torch.save(checkpoint, checkpoint_path)
-            print('checkpoint saved')
+            torch.save(model_checkpoint, checkpoint_path)
+            print('model checkpoint saved')
 
             torch.save(buffer, buffer_path)
             print('buffer saved')
@@ -264,9 +272,8 @@ def main():
             torch.save(cos_checkpoint, cos_path)
             print('cosine similarity saved')
 
-
-    # pickle data files
-
+    frams_dict_path = os.path.join(full_path, f'env_frames.npz')
+    np.savez(frams_dict_path, **env_frames)
 
     logger.finish()
 

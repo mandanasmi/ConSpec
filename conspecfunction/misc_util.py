@@ -4,6 +4,8 @@ import gym
 import torch
 import torch.nn as nn
 
+def serialize_object(obj):
+    return {attr: getattr(obj, attr) for attr in dir(obj) if not attr.startswith('__') and not callable(getattr(obj, attr))}
 
 def set_global_seeds(seed):
     torch.manual_seed(seed)

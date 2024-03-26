@@ -4,9 +4,9 @@
 #SBATCH --mem=16GB
 #SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=8
-#SBATCH --output=sbatch_out/conspec_key_to_door4_train.%A.%a.out
-#SBATCH --error=sbatch_err/conspec_key_to_door4_train.%A.%a.err
-#SBATCH --job-name=conspec_key_to_door4_train
+#SBATCH --output=sbatch_out/conspec_key_to_door3_train.%A.%a.out
+#SBATCH --error=sbatch_err/conspec_key_to_door3_train.%A.%a.err
+#SBATCH --job-name=conspec_key_to_door3_train
 
 echo "Date:     $(date)"
 
@@ -17,6 +17,6 @@ conda activate py37tf15
 
 # Stage dataset into $SLURM_TMPDIR
 
-python -u main.py --pycolab_game key_to_door4 --num_episodes 10000 --seed 1 --num-processes 32 --checkpoint_interval 1 --start_checkpoint 0
+python -u main.py --pycolab_game key_to_door4 --num_episodes 10000 --seed 1 --num-processes 32 --num_prototypes 6 --checkpoint_interval 1 --start_checkpoint 0 
 
 

@@ -25,11 +25,9 @@ import tensorflow.compat.v1 as tf
 # from data_collection import collect_gfn_data, read_data, get_cosine_similarity, visualize
 import pickle
 import datetime
+from pathlib import Path
 
-'''
-The code below is nearly identical to https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail 
-With only minor additions of ConSpec-specific operations that have been commented ########
-'''
+
 
 def main_eval():
     args = get_args()
@@ -37,9 +35,9 @@ def main_eval():
     torch.cuda.manual_seed_all(args.seed)
 
     # Create the folder for results 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d")
     subfolder_name = f"{timestamp}_{args.pycolab_game}_{args.seed}_{args.num_episodes}"
-    base_directory = "data"
+    base_directory = '/network/scratch/s/samieima/conspec_eval'
     full_path = os.path.join(base_directory, subfolder_name)
     os.makedirs(full_path, exist_ok=True)
 
@@ -54,7 +52,7 @@ def main_eval():
     proj_name = str(args.pycolab_game) +' seed'+ str(args.seed)+ ' episodes'+ str(args.num_episodes)
     logger = Logger(
         exp_name=proj_name,
-        save_dir='/home/mila/s/samieima/scratch/conspec',
+        save_dir='/network/scratch/s/samieima/conspec_eval',
         print_every=1,
         save_every=args.log_interval,
         total_step=args.num_episodes,
@@ -208,13 +206,13 @@ def main_eval():
         rollouts.after_update()
 
        
-        if episode % args.log_interval == 0 and len(episode_rewards) > 1:
+        if episode % args.log_interval == 0 and len(episode_rewards) > 0:
             logger.meter("results", "R", rewardstotal[-10:,:].sum(0).mean().cpu().detach().numpy())
             logger.meter("results", "dist_entropy", dist_entropy)
             logger.meter("results", "value_loss", value_loss)
             logger.meter("results", "action_loss", action_loss)
 
-        if episode > args.start_checkpoint and (episode+1) % args.checkpoint_interval == 0:
+        if episode > args.start_checkpoint and (episode) % args.checkpoint_interval == 0:
             buffer = {
              'obs': rollouts.obs,
              'rewards': rollouts.rewards,
