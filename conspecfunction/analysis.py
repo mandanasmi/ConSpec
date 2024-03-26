@@ -3,29 +3,19 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-def vis_proto_states(data_path, cos_path ):
-
-    sf_buffer_obs = torch.load(data_path)['obs']
-    cos_max_scores = torch.load(cos_path)['cos_max_scores']
-    cos_max_indices = torch.load(cos_path)['max_indices']
-    cos_scores = torch.load(cos_path)['cos_scores']
+def vis_proto_states(sf_buffer_obs, cos_scores):
+    '''
+    plot the states that are matched with each prototype using cos scores and not max score
+   num_prototype figures each has num_processes images
+    '''
     cos_score_proto =  {}
-    sf_buffer_obs = sf_buffer_obs.detach().cpu().numpy()
-    cos_max_scores = cos_max_scores.detach().cpu().numpy()
-    cos_max_indices = cos_max_indices.detach().cpu().numpy()
-    cos_scores = cos_scores.detach().cpu().numpy()
     sf_obs_reshaped = np.reshape(sf_buffer_obs, (cos_scores.shape[0], cos_scores.shape[1], *sf_buffer_obs.shape[1:]))
-    num_processes = cos_max_scores.shape[0]  
-    num_prototypes = cos_max_scores.shape[1]
-    # fig, axes = plt.subplots(num_processes, num_prototypes, figsize=(15, 10))
-    # axes = axes.flatten()
+    num_prototypes = cos_scores.shape[2]
 
+    # axes = axes.flatten()
     fig, axes = plt.subplots(1, 32, figsize=(32 * 2, 2))
 
-    # print(sf_buffer_obs.shape, cos_max_scores.shape, cos_max_indices.shape, cos_scores.shape)
-    # print(cos_max_indices, cos_max_scores)
     # Iterate over time steps and processes to find observations with maximum cosine similarity
-
     for prototype in range(num_prototypes):
         cos_score_proto[prototype] = cos_scores[:,:,prototype]
         indx = np.argmax(cos_score_proto[prototype], axis=0)
@@ -39,91 +29,147 @@ def vis_proto_states(data_path, cos_path ):
         # Iterate over the list of images
         for i, image in enumerate(obs_over_time):
             # Plot the i-th image
+            if image.max() > 1.0:  # assuming the data should be in [0, 1] range
+                image = image / 255.0  # Normalize
+            elif image.max() > 1.0:
+                image = image.astype(np.uint8)
+
             axes[i].imshow(image)
             axes[i].axis('off')
+            # set the title of each obs with cosine similarity
+            title = ''
+            if scores is not None:
+                score = scores[i]
+                title += f"Score: {score:.2f}"
+            axes[i].set_title(title)
         plt.tight_layout()
         plt.savefig("states_prototypes{}.png".format(prototype))
 
 
-    #         idx = num_prototypes * i + prototype
-
-    #         axes[idx].imshow(obs)
-    #         # axes[idx].set_title(f"Prototype: {prototype}, Score: {scores}")
-    #         axes[idx].axis('off')
-    # plt.savefig(f"states_prototypes.png")
-
-    #         fig, axes = plt.subplots(1, len(max_cosine_observation), figsize=(10, 2))
-    #         fig.suptitle(f"Time Step {time_step}, Process {process}")
-            
-    #         for i, observation in enumerate(max_cosine_observation):
-    #             axes[i].imshow(observation, cmap='gray')
-    #             axes[i].axis('off')
-    #             axes[i].set_title(f"Prototype {i + 1}")
-            
-    #         plt.savefig(f"time_step_{time_step}_process_{process}.png")
-    #         plt.close()  # Close the figure to avoid displaying it
-
 def extract_observations(cosine_sim_idx_matrix, observation_matrix):
+    """
+    Given matrices:
+    cosine_similarity_matrix -> (32, 8) or (8, )
+    observation_matrix => (185, 32, 3, 5, 5) or (32, 8, 3, 5, 5)
+    """
+    if cosine_sim_idx_matrix.ndim == 2:  # When cosine similarity index matrix is 2D
+        num_time_steps = cosine_sim_idx_matrix.shape[0]
+        num_prototypes = cosine_sim_idx_matrix.shape[1]
 
-    # Example matrices
-    # cosine_similarity_matrix -> (32, 8)
-    # observation_matrix => (185, 32, 3, 5, 5)
+        extracted_observations = np.zeros((num_time_steps, num_prototypes, *observation_matrix.shape[2:]))
+        for i in range(cosine_sim_idx_matrix.shape[0]):
+            for j in range(cosine_sim_idx_matrix.shape[1]):
+                idx = cosine_sim_idx_matrix[i, j]
+                observation = observation_matrix[idx, i]  # Extract the observation
+                extracted_observations[i, j] = observation  # Assign to the result
 
-    # Extract observations
-    extracted_observations = np.zeros((cosine_sim_idx_matrix.shape[0], cosine_sim_idx_matrix.shape[1], *observation_matrix.shape[2:]))
-
-    for i in range(cosine_sim_idx_matrix.shape[0]):
-        for j in range(cosine_sim_idx_matrix.shape[1]):
-            idx = cosine_sim_idx_matrix[i, j]
-            observation = observation_matrix[idx, i]  # Extract the observation
-            extracted_observations[i, j] = observation  # Assig
+    elif cosine_sim_idx_matrix.ndim == 1:  # When cosine similarity index matrix is 1D
+        num_prototypes = cosine_sim_idx_matrix.shape[0]
+        extracted_observations = np.zeros((num_prototypes, *observation_matrix.shape[2:]))
+        for j in range(num_prototypes):
+            idx = cosine_sim_idx_matrix[j]
+            observation = observation_matrix[idx, j]  # Extract the observation
+            extracted_observations[j] = observation  # Assign to the result
 
     return extracted_observations
 
 
-def plot_observations(observations):
-    # Number of rows and columns in the cosine similarity matrix
-    rows, cols = observations.shape[:2]
+def plot_observations(observations, scores, path, filename):
+    """
+    Given matrices:
+    scores -> (32, 8) or (8, )
+    observations => (32, 8, 3, 5, 5) or (8, 3, 5, 5)
+    """
+    if scores.ndim == 2:
+        # Number of rows and columns in the cosine similarity matrix
+        rows, cols = observations.shape[:2]
+        print(rows, cols)
+        fig, axs = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
+        for i in range(rows):
+            for j in range(cols):
+                ax = axs[i, j]
+                obs = observations[i, j].transpose(1, 2, 0)  # Adjust for color channel position
+                
+                if obs.max() > 1.0:  # assuming the data should be in [0, 1] range
+                    obs = obs / 255.0  # Normalize
+                # Convert to uint8 if data is of integer type but not uint8
+                elif obs.max() > 1.0:
+                    obs = obs.astype(np.uint8)
+                
+                
+                ax.imshow(obs, vmin=0, vmax=1)
+                ax.axis('off')
+                # add title with cosine similarity score
+                title = ''
+                if scores is not None:
+                    score = scores[i, j]
+                    title += f"Score: {score:.2f}"
+                ax.set_title(title)
+        plt.tight_layout()
 
-    fig, axs = plt.subplots(rows, cols, figsize=(cols * 2, rows * 2))
-    
-    for i in range(rows):
-        for j in range(cols):
-            ax = axs[i, j]
-            obs = observations[i, j].transpose(1, 2, 0)  # Adjust for color channel position
-            
+    elif scores.ndim == 1:
+        rows = observations.shape[0]
+        print(rows)
+        fig, axs = plt.subplots(rows, figsize=(rows * 2, rows))
+        
+        for i in range(rows):
+            ax = axs[i]
+            obs = observations[i].transpose(1, 2, 0)  # Adjust for color channel position
             if obs.max() > 1.0:  # assuming the data should be in [0, 1] range
                 obs = obs / 255.0  # Normalize
+            # Convert to uint8 if data is of integer type but not uint8
+            elif obs.max() > 1.0:
+                obs = obs.astype(np.uint8)
+            
             
             ax.imshow(obs, vmin=0, vmax=1)
             ax.axis('off')
+            # add title with cosine similarity score
+            title = ''
+            if scores is not None:
+                score = scores[i]
+                title += f"Score: {score:.2f}, Prototype: {i}"
+            ax.set_title(title)
+        plt.tight_layout()
+    
+    # Create folder if it doesn't exist
+    if not os.path.exists(path):
+        os.makedirs(path)
 
-    plt.tight_layout()
-    plt.show()
-    plt.savefig(f"max_states.png")
+    # Save the figure
+    save_path = os.path.join(path, filename)
+    fig.savefig(save_path)
+    plt.close(fig)  # Close the plot to free up memory
+    return save_path
 
 
-
-
-def vis_proto_max_state(obs, cos_score, indices, num_processes, num_prototypes):
-
+def vis_proto_max_state_processes(obs, max_cos_score, indices, num_processes, path, filename):
+    '''
+    num_processes rows of num of prototype images, a figure of 32 x 8 
+    '''
     dim= int(obs.shape[0]/num_processes)
     sf_obs_reshaped = np.reshape(obs, (dim, num_processes, *sf_buffer_obs.shape[1:]))
-    # print(sf_obs_reshaped.shape)
-    maxx_indx = np.argmax(cos_max_scores, axis=0)
-    maxx_scores = np.max(cos_max_scores, axis=0)
-    # print(maxx_indx, maxx_scores)
-    extracted_obs = extract_observations(cos_max_indices, sf_obs_reshaped)
-    plot_observations(extracted_obs)
+    extracted_obs = extract_observations(indices, sf_obs_reshaped)
+    saved_file_path = plot_observations(extracted_obs, max_cos_score, path, filename)
+
+def vis_proto_max_state(obs, max_cos_score, indices, num_processes, path, filename):
+    dim= int(obs.shape[0]/num_processes)
+    sf_obs_reshaped = np.reshape(obs, (dim, num_processes, *sf_buffer_obs.shape[1:]))
+    extracted_obs = extract_observations(indices, sf_obs_reshaped) # (32, 8, 3, 5, 5)
+    maxx_score = np.max(max_cos_score, axis=0) # max over processes
+    maxx_index = np.argmax(max_cos_score, axis=0)
+    max_extracted_obs = extract_observations(maxx_index, extracted_obs)
+    saved_file_path = plot_observations(max_extracted_obs, maxx_score, path, filename)
 
 if __name__ == "__main__":
+
+    ### Data loaded from key to door 3 envs
     base_directory = "data/kd3/"
     data_path = 'conspec_rollouts_epoch_650.pth'
     cos_sim_path = 'cos_sim_epoch_650.pth'
-
     data_full_path = os.path.join(base_directory, data_path)
     cos_full_path = os.path.join(base_directory, cos_sim_path)
-
+    ## Load the data
     sf_buffer_obs = torch.load(data_full_path)['obs']
     cos_max_scores = torch.load(cos_full_path)['cos_max_scores']
     cos_max_indices = torch.load(cos_full_path)['max_indices']
@@ -135,5 +181,12 @@ if __name__ == "__main__":
     cos_scores = cos_scores.detach().cpu().numpy()
     num_processes = cos_max_scores.shape[0]  
     num_prototypes = cos_max_scores.shape[1]
-
-    vis_proto_max_state(sf_buffer_obs, cos_max_scores, cos_max_indices, num_processes, num_prototypes)
+    
+    figure_path = "data/kd3/figures/"
+    # filename = "max_states_kd3.png"
+    # vis_proto_max_state_processes(sf_buffer_obs, cos_max_scores, cos_max_indices, num_processes, figure_path, filename)
+    
+    # vis_proto_states(sf_buffer_obs, cos_scores)
+    
+    filename = "max_proto_1state_kd3.png"
+    vis_proto_max_state(sf_buffer_obs, cos_max_scores, cos_max_indices, num_processes, figure_path, filename)
