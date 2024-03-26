@@ -72,7 +72,7 @@ class EncoderConSpec(nn.Module):
 
         return value, action_log_probs, dist_entropy, rnn_hxs
 
-    def retrieve_hiddens(self, inputs, rnn_hxs, masks, action):
+    def retrieve_hiddens(self, inputs, rnn_hxs, masks):
         value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
         return actor_features
 
@@ -178,7 +178,6 @@ class CNNBase(NNBase):
                                constant_(x, 0))
 
         self.critic_linear = init_(nn.Linear(hidden_size, 1))
-
         self.train()
 
     def forward(self, inputs, rnn_hxs, masks):

@@ -21,15 +21,15 @@ try:
 except ImportError:
     pass
 
-try:
-    import roboschool
-except ImportError:
-    pass
+# try:
+#     import roboschool
+# except ImportError:
+#     pass
 
-try:
-    import pybullet_envs
-except ImportError:
-    pass
+# try:
+#     import pybullet_envs
+# except ImportError:
+#     pass
 
 
 def make_env(env_id, seed, rank, log_dir, allow_early_resets):
