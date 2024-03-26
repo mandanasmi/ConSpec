@@ -4,40 +4,28 @@ import torch
 import csv 
 import pandas as pd
 import glob
+import argparse
 
-def collect_gfn_data_max_states(exp_name, epoch):
-    base_directory = "data"
-    full_path = os.path.join(base_directory, exp_name)
 
-    # buffer_path = os.path.join(full_path, 'buffer_epoch_{}.pth'.format(epoch))
-    sf_buffer = os.path.join(full_path, 'conspec_rollouts_epoch_{}.pth'.format(epoch))
-    observations = torch.load(sf_buffer)['obs']
-    # observations = torch.load(buffer_path)['obs']
-    cos_path = os.path.join(full_path, 'cos_sim_epoch_{}.pth'.format(epoch))
-    cos_sim_info = torch.load(cos_path)
-    cos_scores_max = cos_sim_info['cos_max_scores'].detach().cpu().numpy()
-    max_indices = cos_sim_info['max_indices'].detach().cpu().numpy()
-    print(observations.shape, cos_scores_max.shape)
-    # Number of batches
-    num_batches = cos_scores_max.shape[0]
-    num_similar = cos_scores_max.shape[1]
+def collect_gfn_data_max_states(sf_buffer_obs, cos_max_scores, max_indices, num_processes, num_prototypes, path, filename):
+    '''
+    sf_buffer_obs: (185, 32, 3, 5, 5)
+    cos_max_scores: (32, 8)
+    max_indices: (32, 8)
+    num_processes: 8
+    path: path to save the data
+    filename: name of the data
+    '''
     cos_sim_threshold = 0.6
-    num_prototypes = cos_scores_max.shape[1]
     data = []
     cos_data = []
-    default = (np.zeros((3,5,5)), -1)
-    state_prototypes = {0:default, 1:default, 2: default, 3: default, 4: default, 5:default, 6: default, 7:default} # prototype, states, cosine similarity 
     
-    for group_idx in range(num_batches):
-        traj_proto = []
-        cos_proto = []
+    for process_idx in range(num_processes):
+        traj_proto, cos_proto = [], []
         proto_active = False
-        for i in range(num_similar):
-            # Calculate the index in the flattened axes array
-            # ax_idx = group_idx * num_similar + i
-        
-            idx = max_indices[group_idx, i]
-            cos_sim = cos_scores_max[group_idx, i]
+        for i in range(num_prototypes):
+            idx = max_indices[process_idx, i]
+            cos_sim = cos_scores_max[process_idx, i]
             if cos_sim > cos_sim_threshold:
                 proto_active = True
             else: 
@@ -47,18 +35,19 @@ def collect_gfn_data_max_states(exp_name, epoch):
         data.append(traj_proto)
         cos_data.append(cos_proto)
    
-    gfn_path = 'data/gfn/max_gfn_data_{}_{}.csv'.format(exp_name,epoch)
-    cos_path = 'data/gfn/max_cos_data_{}_{}.csv'.format(exp_name, epoch)
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    # Save the figure
+    save_path = os.path.join(path, filename)
     # Write the data to a CSV file
-    with open(gfn_path, 'w', newline='') as file:
+    with open(f'{save_path}_binary_th_{cos_sim_threshold}.csv', 'w', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow(['Prototype_' + str(i) for i in range(num_prototypes)])
+        writer.writerow(['P_' + str(i) for i in range(num_prototypes)])
         writer.writerows(data)
-    with open(cos_path, 'w', newline='') as file:
+    with open(f'{save_path}_cos.csv', 'w', newline='') as file:
         writer = csv.writer(file)
         writer.writerows(cos_data)
-    # print(state_prototypes)
-    return state_prototypes
 
 
 def collect_gfn_data(exp_name, epoch):
@@ -114,13 +103,13 @@ def collect_gfn_data(exp_name, epoch):
     # print(state_prototypes)
     return state_prototypes
 
-def merge_csv_files(exp_name, prefix, output_file): 
-    # List all CSV files in the current directory
-    base_directory = "data/gfn/"
-    full_path = os.path.join(base_directory)
+def merge_csv_files(base_path, prefix, postfix, output_file): 
+    
+    full_path = os.path.join(base_path)
     # Combine all CSV files into a single DataFrame
-    file_list = glob.glob(full_path + "/{}_*.csv".format(prefix))
-    print(file_list)
+    file_list = glob.glob(full_path + "{}_*_{}*.csv".format(prefix, postfix))
+    num_files = len(file_list)
+    print(num_files)
     files = [f for f in file_list]
 
     combined_csv = pd.concat([pd.read_csv(file) for file in files], ignore_index=True)
@@ -129,26 +118,43 @@ def merge_csv_files(exp_name, prefix, output_file):
     combined_csv.to_csv(output_file, index=False)
 
 
-
-
 if __name__ == "__main__":
-    exp_name_ktd2 = '20240228-031400_key_to_door2_1_1000'
-    exp_name_ktd3 = '20240319-193056_key_to_door3_1_5000' 
-    exp_name_ktd4 = '20240229-011752_key_to_door4_1_3000'
-    exp_kd3_eval = '20240319-212006_key_to_door3_1_2500'
+
+    parser = argparse.ArgumentParser(description='Collect data for GFN')
+    parser.add_argument('--exp_name', type=str, default='20240325-152802_key_to_door3_1_10000', help='Experiment name')
+    parser.add_argument('--num_episodes', type=int, default=10000, help='Epoch number')
+    parser.add_argument('--cos_sim_threshold', type=float, default=0.6, help='Cosine similarity threshold')
+    parser.add_argument('--merge_data', action='store_true', default=False, help='if you are merging the csv files')
+    parser.add_argument('--output_file', type=str, default='merged_binary_kd3_10k_0.6.csv', help='Output file name')
+    parser.add_argument('--output_csv_files_prefix', type=str, default='gfn_kd3_10k_', help='Output cosine csv file name')
+    args = parser.parse_args()
+
+    base_directory = '/network/scratch/s/samieima/conspec_train/20240325-152802_key_to_door3_1_10000/'
     
+    if args.merge_data == False:
+        for i in range(args.num_episodes):
+            if i == 0: 
+                continue
+            data_path = f'conspec_rollouts_epoch_{i}.pth'
+            cos_sim_path = f'cos_sim_epoch_{i}.pth'
+            data_full_path = os.path.join(base_directory, data_path)
+            cos_full_path = os.path.join(base_directory, cos_sim_path)
+            
+            sf_buffer =  torch.load(data_full_path)['obs']
+            cos_sim_info = torch.load(cos_full_path)
+            cos_scores_max = cos_sim_info['cos_max_scores'].detach().cpu().numpy()
+            max_index = cos_sim_info['max_indices'].detach().cpu().numpy()
+            num_processes = cos_scores_max.shape[0]
+            num_prototypes = cos_scores_max.shape[1]
 
-    for i in np.arange(1, 40, 1):
-        collect_gfn_data_max_states(exp_kd3_eval, i)
 
+            csv_path = '/network/scratch/s/samieima/conspec_train/20240325-152802_key_to_door3_1_10000/csv_files/'
+            filename = f'gfn_kd3_10k_{i}'
+            collect_gfn_data_max_states(sf_buffer, cos_scores_max, max_index, num_processes, num_prototypes, csv_path, filename)
 
+    elif args.merge_data == True:
+        csv_path = 'csv_files/'
+        merge_csv_files(f'{base_directory}{csv_path}', 'gfn_kd3_10k_', 'binary', 'merged_binary_kd3_10k_0.6.csv')
+        # merge_csv_files(f'{base_directory}{csv_path}', 'gfn_kd3_10k_', 'cos', 'merged_cosine_kd3_10k_0.6.csv')
 
-    # merge_csv_files(exp_name_ktd3, 'max_gfn_data_{}'.format(exp_name_ktd3), 'merged_rollouts_kd3_5k_odds.csv')
-
-    # collect_gfn_data_max_states(exp_name_ktd3, 1499)
-    # collect_gfn_data_max_states(exp_name_ktd3, 1599)
-    # collect_gfn_data_max_states(exp_name_ktd3, 1699)
-    # collect_gfn_data_max_states(exp_name_ktd3, 1799)
-    # collect_gfn_data_max_states(exp_name_ktd3, 1899)
-    # collect_gfn_data_max_states(exp_name_ktd3, 1999)
 

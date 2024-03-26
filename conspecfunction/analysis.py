@@ -6,7 +6,9 @@ import matplotlib.pyplot as plt
 def vis_proto_states(sf_buffer_obs, cos_scores):
     '''
     plot the states that are matched with each prototype using cos scores and not max score
-   num_prototype figures each has num_processes images
+    num_prototype figures each has num_processes images
+    sf_buffer_obs -> (185, 32, 3, 5, 5) : time steps, processes, channels, height, width
+    cos_scores -> (185, 32, 8)
     '''
     cos_score_proto =  {}
     sf_obs_reshaped = np.reshape(sf_buffer_obs, (cos_scores.shape[0], cos_scores.shape[1], *sf_buffer_obs.shape[1:]))
@@ -121,7 +123,6 @@ def plot_observations(observations, scores, path, filename):
             elif obs.max() > 1.0:
                 obs = obs.astype(np.uint8)
             
-            
             ax.imshow(obs, vmin=0, vmax=1)
             ax.axis('off')
             # add title with cosine similarity score
@@ -138,7 +139,7 @@ def plot_observations(observations, scores, path, filename):
 
     # Save the figure
     save_path = os.path.join(path, filename)
-    fig.savefig(save_path)
+    plt.savefig(save_path)
     plt.close(fig)  # Close the plot to free up memory
     return save_path
 
@@ -164,16 +165,19 @@ def vis_proto_max_state(obs, max_cos_score, indices, num_processes, path, filena
 if __name__ == "__main__":
 
     ### Data loaded from key to door 3 envs
-    base_directory = "data/kd3/"
-    data_path = 'conspec_rollouts_epoch_650.pth'
-    cos_sim_path = 'cos_sim_epoch_650.pth'
+    base_directory = '/network/scratch/s/samieima/conspec_train/20240325-152802_key_to_door3_1_10000/'
+    
+    data_path = 'conspec_rollouts_epoch_9999.pth'
+    cos_sim_path = 'cos_sim_epoch_9999.pth'
+    
     data_full_path = os.path.join(base_directory, data_path)
     cos_full_path = os.path.join(base_directory, cos_sim_path)
+    
     ## Load the data
-    sf_buffer_obs = torch.load(data_full_path)['obs']
-    cos_max_scores = torch.load(cos_full_path)['cos_max_scores']
-    cos_max_indices = torch.load(cos_full_path)['max_indices']
-    cos_scores = torch.load(cos_full_path)['cos_scores']
+    sf_buffer_obs = torch.load(data_full_path)['obs'] #  (185, 32, 3, 5, 5)
+    cos_max_scores = torch.load(cos_full_path)['cos_max_scores'] # (32, 8)
+    cos_max_indices = torch.load(cos_full_path)['max_indices'] # (32, 8)
+    cos_scores = torch.load(cos_full_path)['cos_scores'] # (185, 32, 8)
 
     sf_buffer_obs = sf_buffer_obs.detach().cpu().numpy()
     cos_max_scores = cos_max_scores.detach().cpu().numpy()
@@ -182,11 +186,11 @@ if __name__ == "__main__":
     num_processes = cos_max_scores.shape[0]  
     num_prototypes = cos_max_scores.shape[1]
     
-    figure_path = "data/kd3/figures/"
-    # filename = "max_states_kd3.png"
-    # vis_proto_max_state_processes(sf_buffer_obs, cos_max_scores, cos_max_indices, num_processes, figure_path, filename)
+    figure_path = "data/key_to_door3_10000/figures/"
+    filename = "max_states_key_to_door3_10000.png"
+    vis_proto_max_state_processes(sf_buffer_obs, cos_max_scores, cos_max_indices, num_processes, figure_path, filename)
     
     # vis_proto_states(sf_buffer_obs, cos_scores)
     
-    filename = "max_proto_1state_kd3.png"
+    filename = "max_proto_1state_key_to_door3_10000.png"
     vis_proto_max_state(sf_buffer_obs, cos_max_scores, cos_max_indices, num_processes, figure_path, filename)
