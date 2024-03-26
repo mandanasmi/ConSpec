@@ -5,9 +5,9 @@ import csv
 import pandas as pd
 import glob
 import argparse
+import pdb
 
-
-def collect_gfn_data_max_states(sf_buffer_obs, cos_max_scores, max_indices, num_processes, num_prototypes, path, filename):
+def collect_gfn_data_max_states(cos_max_scores, max_indices, num_processes, num_prototypes, path, filename):
     '''
     sf_buffer_obs: (185, 32, 3, 5, 5)
     cos_max_scores: (32, 8)
@@ -25,7 +25,7 @@ def collect_gfn_data_max_states(sf_buffer_obs, cos_max_scores, max_indices, num_
         proto_active = False
         for i in range(num_prototypes):
             idx = max_indices[process_idx, i]
-            cos_sim = cos_scores_max[process_idx, i]
+            cos_sim = cos_max_scores[process_idx, i]
             if cos_sim > cos_sim_threshold:
                 proto_active = True
             else: 
@@ -105,15 +105,17 @@ def collect_gfn_data(exp_name, epoch):
 
 def merge_csv_files(base_path, prefix, postfix, output_file): 
     
-    full_path = os.path.join(base_path)
     # Combine all CSV files into a single DataFrame
-    file_list = glob.glob(full_path + "{}_*_{}*.csv".format(prefix, postfix))
+    if postfix == 'binary':
+        file_list = glob.glob(base_path + "{}*{}*".format(prefix, postfix))
+    elif postfix == 'cos':
+        file_list = glob.glob(base_path + "{}*{}.csv".format(prefix, postfix))
     num_files = len(file_list)
-    print(num_files)
+   
     files = [f for f in file_list]
 
-    combined_csv = pd.concat([pd.read_csv(file) for file in files], ignore_index=True)
-
+    combined_csv = pd.concat([pd.read_csv(file) for file in files], ignore_index=True, sort=False)
+    print(combined_csv.shape)
     # Write the combined DataFrame to a new CSV file
     combined_csv.to_csv(output_file, index=False)
 
@@ -124,13 +126,14 @@ if __name__ == "__main__":
     parser.add_argument('--exp_name', type=str, default='20240325-152802_key_to_door3_1_10000', help='Experiment name')
     parser.add_argument('--num_episodes', type=int, default=10000, help='Epoch number')
     parser.add_argument('--cos_sim_threshold', type=float, default=0.6, help='Cosine similarity threshold')
-    parser.add_argument('--merge_data', action='store_true', default=False, help='if you are merging the csv files')
+    parser.add_argument('--merge_data', action='store_true', default=True, help='if you are merging the csv files')
     parser.add_argument('--output_file', type=str, default='merged_binary_kd3_10k_0.6.csv', help='Output file name')
     parser.add_argument('--output_csv_files_prefix', type=str, default='gfn_kd3_10k_', help='Output cosine csv file name')
     args = parser.parse_args()
 
     base_directory = '/network/scratch/s/samieima/conspec_train/20240325-152802_key_to_door3_1_10000/'
-    
+    csv_path = 'csv_files/'
+
     if args.merge_data == False:
         for i in range(args.num_episodes):
             if i == 0: 
@@ -147,14 +150,13 @@ if __name__ == "__main__":
             num_processes = cos_scores_max.shape[0]
             num_prototypes = cos_scores_max.shape[1]
 
-
-            csv_path = '/network/scratch/s/samieima/conspec_train/20240325-152802_key_to_door3_1_10000/csv_files/'
+            path = f'{base_directory}{csv_path}'
             filename = f'gfn_kd3_10k_{i}'
-            collect_gfn_data_max_states(sf_buffer, cos_scores_max, max_index, num_processes, num_prototypes, csv_path, filename)
+            collect_gfn_data_max_states(cos_scores_max, max_index, num_processes, num_prototypes, path, filename)
 
     elif args.merge_data == True:
-        csv_path = 'csv_files/'
-        merge_csv_files(f'{base_directory}{csv_path}', 'gfn_kd3_10k_', 'binary', 'merged_binary_kd3_10k_0.6.csv')
-        # merge_csv_files(f'{base_directory}{csv_path}', 'gfn_kd3_10k_', 'cos', 'merged_cosine_kd3_10k_0.6.csv')
+        base_path = f'{base_directory}{csv_path}'
+        # merge_csv_files(base_path, 'gfn_kd3_10k_', 'binary', 'merged_binary_kd3_10k_0.6.csv')
+        merge_csv_files(base_path, 'gfn_kd3_10k_', 'cos', 'merged_cosine_kd3_10k_0.6.csv')
 
 
